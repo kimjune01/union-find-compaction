@@ -201,3 +201,48 @@ Trials 1-3 tested the naive spec. The naive version dumps ALL cold summaries int
 The control (flat) stays the same: one summary of all cold messages. The treatment (UF) becomes: embed the question, retrieve top-k cold e-classes by centroid similarity, inject those summaries + hot. The comparison is now flat-dump vs structured-retrieval. This is a fairer test of the thesis — the advantage isn't "multiple summaries vs one summary", it's "indexed retrieval vs opaque blob."
 
 ---
+
+### Trial 4: Haiku, 200 messages, v2 (retrieval path)
+
+**Model:** claude-haiku-4-5-20251001
+**Date:** 2026-03-15
+**Flat:** 27/40 (68%)
+**UF:** 33/40 (82%)
+**p = 0.1796. FAIL TO REJECT H₀.**
+**Cohen's g = 0.214** (small effect)
+
+Discordant pairs: 14 total. 10 favored UF, 4 favored Flat.
+
+**66 e-classes.** The incremental compaction with TF-IDF and merge_threshold=0.3 barely merged anything. Most filler messages became singletons. With k=3 retrieval, the model sees 3 out of 66 cold clusters per question — very selective. Sometimes the right cluster isn't in the top 3.
+
+UF lost 4 questions that v1-dump would have caught:
+- Q7 (token expiry): retrieved wrong clusters
+- Q17 (test parallelism): the CI fact was in a singleton that didn't rank top-3
+- Q21 (Stripe Connect): billing cluster wasn't retrieved for this phrasing
+- Q22 (platform fee): partial answer — retrieved billing but missed specificity
+
+UF gained questions v1 missed:
+- Q25 (dunning), Q30 (Grafana), Q32 (TCA), Q34 (deep links), Q35 (binary size) — these facts lived in tight topic clusters that the retrieval found cleanly
+
+**Diagnosis:** Two compounding issues:
+
+1. **Too many singletons.** TF-IDF cosine between short filler messages ("Got it, makes sense") and substantive facts is low. Threshold 0.3 doesn't merge them. The forest has 66 clusters when it should have ~8-10 (one per topic + a filler bucket).
+
+2. **k=3 is too selective.** A question about billing infrastructure might need facts from both the billing cluster and the monitoring cluster. k=3 doesn't cover cross-topic questions.
+
+**Fix:** The merge threshold should be tuned to produce ~10 topic-level clusters, not 66 singletons. Alternatively: batch compaction (v1) for cluster formation, retrieval (v2) for context injection. Hybrid.
+
+**Cross-trial summary (updated):**
+
+| Trial | Model | Version | Flat | UF | p | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | Haiku, 50msg | v1 dump | 90% | 90% | 1.000 | No difference |
+| 2 | Haiku, 200msg | v1 dump | 65% | 82% | 0.039 | **UF wins** |
+| 3 | Sonnet, 200msg | v1 dump | 70% | 78% | 0.453 | Directional |
+| 4 | Haiku, 200msg | v2 retrieve | 68% | 82% | 0.180 | Directional |
+
+The retrieval path didn't improve on v1. It gained some questions (better topic targeting) and lost others (missed cross-topic). UF accuracy held at 82% across v1 and v2, suggesting the cluster content is the same — it's the injection strategy that varies.
+
+**Next:** Reduce e-class count by lowering merge threshold. Keep retrieval.
+
+---
