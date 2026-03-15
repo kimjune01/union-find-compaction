@@ -113,9 +113,21 @@ The pre-registration acknowledged this: "if the effect isn't large, the practica
 2. **Expensive summarizer**: Sonnet/Opus flat summaries preserve enough.
 3. **Coarse recall is sufficient**: If "Stripe" is enough and "Stripe Connect for marketplace payouts" isn't needed.
 
+### Advantages beyond retrieval accuracy
+
+The experiment measured the narrowest possible metric: recall on planted facts. Even at parity on that metric, union-find compaction would still win on three axes that flat summarization cannot touch:
+
+**1. Continuous compaction, better UX.** Flat summarization is batch — the system stalls while it summarizes the entire cold zone in one call. Union-find compaction is amortized over each graduation. One small merge per message. The user never waits for a bulk summarization pass. The context window is always ready.
+
+**2. Smaller chunks afford smaller models.** Each union call summarizes ~20–40 messages, not 190. A cluster-level summary is a task that nano/micro models handle well. Flat summarization demands a model capable of compressing thousands of tokens into hundreds without dropping facts — that's a harder task that requires a more capable (more expensive) model. UF pushes the quality floor down.
+
+**3. Cross-session persistence by default.** The e-class forest is a durable index. Other chat sessions can query it. A new conversation about billing finds the billing cluster from last week without any special setup. Flat summaries are ephemeral — they exist only in the context window that produced them. UF gives you long-term memory as a side effect of compaction.
+
+These advantages compound. Continuous + cheap + persistent means you can run compaction on every conversation, with a tiny model, and the results accumulate across sessions. Flat summarization is a one-shot lossy operation that starts over every time.
+
 ### The real architectural advantage
 
-The experiment tested recall accuracy on planted facts. This is the narrowest possible test of the thesis. The broader claim from the [README](README.md) is about provenance, expandability, and consolidation:
+The experiment tested recall accuracy on planted facts. The broader claim from the [README](README.md) is about provenance, expandability, and consolidation:
 
 - **Expand**: When the model gets a vague answer from a summary, it can reinflate the cluster to source messages. Flat can't do this. Not tested.
 - **Provenance**: Every summary traces to its sources. Flat summaries are opaque. Not tested.
@@ -123,11 +135,35 @@ The experiment tested recall accuracy on planted facts. This is the narrowest po
 
 The recall experiment establishes the foundation: the data structure works, the per-cluster summaries preserve more, and the architecture supports retrieval. The interesting questions are in Phase 2.
 
+## Temporal stamping
+
+A variant that may push the retrieval path over the significance edge: add timestamps to every message.
+
+```json
+{
+  "id": 42,
+  "timestamp": "2026-03-14T10:23:00Z",
+  "content": "user prefers Go over Python",
+  "summary": null
+}
+```
+
+Timestamps solve the hardest failure mode in TUNING.md (section 8, summary staleness): contradiction resolution. "Port 5432" at 09:00 and "actually, use 5433" at 10:30 — with timestamps, the merge function knows which wins. The recency weight parameter becomes structural instead of a prompt hack ("later index = more recent"). The summarizer gets `sorted(messages, key=lambda m: m.timestamp)` for free, and the prompt can say "prefer the 10:45 message over the 09:12 message" instead of "prefer the higher index."
+
+Timestamps also enable time-range retrieval. "What did we discuss this morning?" becomes a filter-then-retrieve operation — no embedding needed for the temporal axis. And across sessions, timestamps give the merge function a global ordering that insertion order cannot provide.
+
+The cost is negligible: one ISO-8601 string per message. The benefit compounds with every feature that depends on recency — contradiction resolution, staleness detection, time-range queries, cross-session ordering.
+
 ## Next steps
 
-1. **Increase N**: 80 questions across 400 messages. The effect should clear alpha with the same magnitude.
-2. **Dense embeddings**: Replace TF-IDF with text-embedding-3-small for clustering and retrieval. Expected: tighter clusters, better retrieval, fewer singletons.
-3. **Adaptive injection**: Dump all when under token budget, retrieve when over. Best of both strategies.
-4. **Expand experiment**: Deliberately ask questions that require detail beyond the summary. Measure whether `expand()` recovers facts that `compact()` lost.
-5. **Real conversations**: Export a long coding session and run the same comparison. No planted facts — use the LLM judge to evaluate answer quality on naturally occurring questions.
-6. **Cross-session consolidation**: The actual thesis. Do clusters that repeatedly co-merge form useful schemas? Does schema-primed context outperform cold-start?
+1. **Temporal stamping**: Add timestamps to the Message dataclass and the merge prompt. Test whether explicit recency ordering improves contradiction resolution and retrieval.
+2. **Increase N**: 80 questions across 400 messages. The effect should clear alpha with the same magnitude.
+3. **Dense embeddings**: Replace TF-IDF with text-embedding-3-small for clustering and retrieval. Expected: tighter clusters, better retrieval, fewer singletons.
+4. **Adaptive injection**: Dump all when under token budget, retrieve when over. Best of both strategies.
+5. **Expand experiment**: Deliberately ask questions that require detail beyond the summary. Measure whether `expand()` recovers facts that `compact()` lost.
+6. **Real conversations**: Export a long coding session and run the same comparison. No planted facts — use the LLM judge to evaluate answer quality on naturally occurring questions.
+7. **Cross-session consolidation**: The actual thesis. Do clusters that repeatedly co-merge form useful schemas? Does schema-primed context outperform cold-start?
+
+## Acknowledgments
+
+Experiment design, implementation, statistical analysis, and all five trial runs were conducted by [Claude Opus 4.6](https://docs.anthropic.com/en/docs/about-claude/models) as a research collaborator over two sessions. The human specified the thesis, the data structure choice, the tunable parameters, and course-corrected after each trial. The agent wrote the code, ran the experiments, diagnosed failures, and documented results. This is the kind of complementary work described in [General Intelligence](https://june.kim/general-intelligence): human sets direction, agent executes and reports back honestly — including when the results don't reach significance.
