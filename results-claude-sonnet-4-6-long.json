@@ -1,0 +1,377 @@
+{
+  "tag": "claude-sonnet-4-6-long",
+  "hot_size": 10,
+  "max_cold_clusters": 5,
+  "flat_accuracy": 0.7,
+  "uf_accuracy": 0.775,
+  "mcnemar": {
+    "a": 26,
+    "b": 2,
+    "c": 5,
+    "d": 7
+  },
+  "p_value": 0.453125,
+  "verdict": "FAIL_TO_REJECT",
+  "trials": [
+    {
+      "question": "What is the source database engine being migrated from?",
+      "topic": "db",
+      "expected": "MySQL 5.7.44",
+      "flat_answer": "Based on the conversation summary in message [0], the source database engine being migrated from is **MySQL 5.7.44** (running since 2019).",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the source database engine being migrated from is **MySQL 5.7.44** (running since 2019).",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the target PostgreSQL version for the migration?",
+      "topic": "db",
+      "expected": "16.3",
+      "flat_answer": "Based on the conversation history, specifically the summary in message [0], the target PostgreSQL version for the migration is **PostgreSQL 16.3**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the target PostgreSQL version for the migration is **PostgreSQL 16.3**.",
+      "uf_correct": true
+    },
+    {
+      "question": "How many tables need to be migrated?",
+      "topic": "db",
+      "expected": "347",
+      "flat_answer": "Based on the conversation summary in [0], **347 tables** need to be migrated (from MySQL 5.7.44 to PostgreSQL 16.3), with approximately 40 of them having custom triggers.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, **347 tables** need to be migrated, of which **40 have custom triggers**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What tool is being used for the schema conversion?",
+      "topic": "db",
+      "expected": "pgloader 3.6.10",
+      "flat_answer": "Based on the conversation summary in message [0], **pgloader 3.6.10** is being used for schema conversion.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, **pgloader 3.6.10** is being used for schema conversion (mentioned in message [0] as part of the MySQL to PostgreSQL migration).",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the estimated downtime window for the migration?",
+      "topic": "db",
+      "expected": "4 hours starting at 02:00 UTC Saturday",
+      "flat_answer": "Based on the conversation history, the migration window is **4 hours**, starting at **02:00 UTC Saturday**, with connection draining beginning at **01:45 UTC**. However, the question asks specifically about \"estimated downtime,\" and the exact downtime duration within that window is **NOT FOUND** \u2014 only the total migration window length and start time are specified.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the migration window is **4 hours**, starting at **02:00 UTC Saturday**, with connection drain beginning at **01:45 UTC**. This is not characterized as \"downtime\" specifically, but it is the defined migration window during which the system transition occurs.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the new JWT signing algorithm?",
+      "topic": "auth",
+      "expected": "EdDSA with Ed25519",
+      "flat_answer": "Based on the conversation summary in message [0], the new JWT signing algorithm is **EdDSA with Ed25519** (replacing the previous RS256 algorithm).",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the new JWT signing algorithm is **EdDSA with Ed25519**, replacing the previous **RS256** algorithm.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the token expiry time?",
+      "topic": "auth",
+      "expected": "15 minutes for access, 7 days for refresh",
+      "flat_answer": "Based on the conversation history, specifically from the Summary of earlier conversation [0]:\n\n- **Access tokens**: 15 minutes\n- **Refresh tokens**: 7 days (rotated on use)",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, there are two token expiry times specified:\n\n- **Access tokens**: **15 minutes**\n- **Refresh tokens**: **7 days** (rotated on use)",
+      "uf_correct": true
+    },
+    {
+      "question": "What Redis key prefix is used for revoked tokens?",
+      "topic": "auth",
+      "expected": "auth:revoked:",
+      "flat_answer": "Based on the conversation summary in message [0], the Redis key prefix used for revoked tokens is **`auth:revoked:`**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the Redis key prefix used for revoked tokens is **`auth:revoked:`**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the maximum number of concurrent sessions per user?",
+      "topic": "auth",
+      "expected": "5",
+      "flat_answer": "Based on the conversation summary in message [0], the maximum number of concurrent sessions per user is **5**, with the oldest session being killed when a 6th login occurs.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the maximum number of concurrent sessions per user is **5**. When a 6th login occurs, the oldest session is killed.",
+      "uf_correct": true
+    },
+    {
+      "question": "What rate limit applies to the /auth/token endpoint?",
+      "topic": "auth",
+      "expected": "10 requests per minute per IP",
+      "flat_answer": "Based on the conversation summary in message [0], the **/auth/token endpoint is rate-limited to 10 requests per minute per IP**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the `/auth/token` endpoint is rate-limited to **10 requests per minute per IP**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What search engine is being deployed?",
+      "topic": "search",
+      "expected": "Meilisearch 1.11",
+      "flat_answer": "Based on the conversation history, specifically from the summary in **[0]**:\n\n**Meilisearch 1.11** is being deployed for product search.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, **Meilisearch 1.11** is the search engine being deployed, handling product search with an initial load of 2.3 million documents.",
+      "uf_correct": true
+    },
+    {
+      "question": "How many documents are in the initial index?",
+      "topic": "search",
+      "expected": "2.3 million",
+      "flat_answer": "Based on the conversation summary in [0], the initial load for Meilisearch contains **2.3 million documents**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the initial load for Meilisearch contains **2.3 million documents**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the p99 search latency target?",
+      "topic": "search",
+      "expected": "50ms",
+      "flat_answer": "Based on the conversation summary in message [0], the p99 latency target is **under 50ms** (with the current prototype hitting 35ms).",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the p99 latency target for Meilisearch product search is **under 50ms**, with the prototype currently hitting **35ms**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What field is used as the primary ranking criterion?",
+      "topic": "search",
+      "expected": "freshness_score descending",
+      "flat_answer": "Based on the conversation summary in message [0]:\n\nThe primary ranking criterion is **`freshness_score` descending**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, specifically message [2]:\n\nThe primary ranking criterion is **`freshness_score` descending**. Newer products rank higher by default.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the maximum filterable attribute count?",
+      "topic": "search",
+      "expected": "64 per index",
+      "flat_answer": "Based on the conversation summary in [0], the maximum filterable attribute count is **64**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the maximum filterable attribute count in Meilisearch is **64**, with **41** currently in use.",
+      "uf_correct": true
+    },
+    {
+      "question": "What CI runner image is being used?",
+      "topic": "ci",
+      "expected": "ubuntu-24.04-arm64",
+      "flat_answer": "Based on the conversation summary in message [0], the CI runner image being used is **ubuntu-24.04-arm64**.",
+      "flat_correct": true,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the test parallelism level?",
+      "topic": "ci",
+      "expected": "8 shards",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the artifact retention period?",
+      "topic": "ci",
+      "expected": "90 days",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the deployment approval requirement for production?",
+      "topic": "ci",
+      "expected": "2 approvals from the platform-oncall group",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "Based on the conversation history, specifically message **[1]**:\n\nProduction deploys require **2 approvals from the platform-oncall group**, with **self-approvals prohibited**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the maximum build time before timeout?",
+      "topic": "ci",
+      "expected": "45 minutes",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What payment processor is being integrated?",
+      "topic": "billing",
+      "expected": "Stripe with Connect for marketplace payouts",
+      "flat_answer": "Based on the conversation summary in message [0], the payment processor being integrated is **Stripe**, specifically using **Stripe Connect** for marketplace payouts.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the payment processor being integrated is **Stripe Connect**, used for marketplace payouts at **2.9% plus $0.30 per transaction**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the platform fee percentage?",
+      "topic": "billing",
+      "expected": "2.9% plus 30 cents per transaction",
+      "flat_answer": "Based on the conversation summary in [0], the platform fee is **2.9% plus $0.30 per transaction** (Stripe Connect for marketplace payouts).",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the platform uses **Stripe Connect** for marketplace payouts at **2.9% plus $0.30 per transaction**. However, this refers to the **Stripe transaction fee**, not a separate \"platform fee percentage\" specifically.\n\nIf the question is asking about a distinct platform fee beyond the Stripe processing fee, that is **NOT FOUND** in the conversation.",
+      "uf_correct": true
+    },
+    {
+      "question": "What webhook endpoint receives payment events?",
+      "topic": "billing",
+      "expected": "/api/v3/webhooks/stripe",
+      "flat_answer": "Based on the conversation history, specifically from the Summary of earlier conversation in [0], the webhook endpoint that receives payment events is:\n\n**`/api/v3/webhooks/stripe`**",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the webhook endpoint that receives payment events is **`/api/v3/webhooks/stripe`**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the invoice generation schedule?",
+      "topic": "billing",
+      "expected": "1st and 15th of each month at 06:00 UTC",
+      "flat_answer": "Based on the conversation summary in **[0]**:\n\nInvoices are generated on the **1st and 15th of each month at 06:00 UTC**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, invoices are generated on the **1st and 15th of each month at 06:00 UTC**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the dunning retry schedule for failed payments?",
+      "topic": "billing",
+      "expected": "retry at 1, 3, 5, and 7 days then suspend",
+      "flat_answer": "Based on the conversation summary in **[0]**, the dunning retry schedule for failed payments is:\n\n**1, 3, 5, and 7 days** before account suspension.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the dunning retry schedule for failed payments is: retries at **1, 3, 5, and 7 days** before account suspension.",
+      "uf_correct": true
+    },
+    {
+      "question": "What metrics backend is being used?",
+      "topic": "monitor",
+      "expected": "VictoriaMetrics 1.106",
+      "flat_answer": "Based on the conversation summary in [0], the metrics backend being used is **VictoriaMetrics 1.106**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the metrics backend being used is **VictoriaMetrics 1.106**, with application scrape intervals at **15 seconds** and infrastructure scrape intervals at **60 seconds**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the scrape interval for application metrics?",
+      "topic": "monitor",
+      "expected": "15 seconds",
+      "flat_answer": "Based on the conversation summary in [0], the scrape interval for application metrics is **15 seconds**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the scrape interval for application metrics is **15 seconds**.\n\n(From message [0]: \"Metrics use VictoriaMetrics 1.106 with application scrape intervals at 15 seconds and infrastructure at 60 seconds.\")",
+      "uf_correct": true
+    },
+    {
+      "question": "What PagerDuty escalation policy is used for P1 alerts?",
+      "topic": "monitor",
+      "expected": "platform-critical with 5-minute escalation",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the error rate threshold that triggers an alert?",
+      "topic": "monitor",
+      "expected": "5% of requests over a 5-minute window",
+      "flat_answer": "Based on the conversation summary in message [0], the error rate alert fires at **5% of requests over a 5-minute window**.",
+      "flat_correct": true,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What Grafana dashboard ID shows the billing pipeline health?",
+      "topic": "monitor",
+      "expected": "dashboard-4471",
+      "flat_answer": "Based on the conversation history, the Grafana dashboard ID for billing pipeline health is **dashboard-4471**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation, the Grafana dashboard ID for billing pipeline health is **dashboard-4471**.",
+      "uf_correct": true
+    },
+    {
+      "question": "What minimum iOS version does the app support?",
+      "topic": "mobile",
+      "expected": "iOS 16.0",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "Based on the conversation history, the app requires a minimum of **iOS 16.0**. iOS 15 was dropped due to it representing only 3% of the user share.",
+      "uf_correct": true
+    },
+    {
+      "question": "What state management library is used in the iOS app?",
+      "topic": "mobile",
+      "expected": "TCA (The Composable Architecture) 1.17",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "Based on the conversation history, the iOS app uses **TCA 1.17** (The Composable Architecture) for state management.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the offline sync conflict resolution strategy?",
+      "topic": "mobile",
+      "expected": "last-write-wins with vector clocks",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What deep link scheme does the app register?",
+      "topic": "mobile",
+      "expected": "myapp://",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "Based on the conversation history, the iOS app uses the **`myapp://`** scheme for deep links (along with universal links on the main domain).",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the app binary size budget?",
+      "topic": "mobile",
+      "expected": "35MB after thinning",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND",
+      "uf_correct": false
+    },
+    {
+      "question": "What streaming platform is used for event ingestion?",
+      "topic": "data",
+      "expected": "Redpanda 24.3",
+      "flat_answer": "Based on the conversation summary in message [0], the streaming platform used for event ingestion is **Redpanda 24.3**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the streaming platform used for event ingestion is **Redpanda 24.3** (which is Kafka-compatible and Raft-based). The `user-events` topic has 32 partitions keyed by `user_id`.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the Kafka topic partition count for user-events?",
+      "topic": "data",
+      "expected": "32",
+      "flat_answer": "Based on the conversation summary in message [0], the user-events topic uses **32 partitions**.",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, the `user-events` topic has **32 partitions**, keyed by `user_id`.",
+      "uf_correct": true
+    },
+    {
+      "question": "What serialization format is used for events?",
+      "topic": "data",
+      "expected": "Avro with schema registry",
+      "flat_answer": "Based on the conversation history, events are serialized as **Avro** (with schema registry), as stated in the summary in message [0].",
+      "flat_correct": true,
+      "uf_answer": "Based on the conversation history, specifically message [1]:\n\n**Avro** is the serialization format used for events, with a schema registry.",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the data retention period in the lake?",
+      "topic": "data",
+      "expected": "7 years for financial, 2 years for behavioral",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "NOT FOUND\n\nThe conversation mentions data retention periods (7 years for financial records and 2 years for behavioral records), but does not reference a \"data lake\" specifically.",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the batch job schedule for the daily aggregation?",
+      "topic": "data",
+      "expected": "cron 0 4 * * * UTC",
+      "flat_answer": "NOT FOUND",
+      "flat_correct": false,
+      "uf_answer": "Based on the conversation history, specifically entry [4]:\n\nThe daily aggregation batch job runs at **cron `0 4 * * *` UTC**, and it takes approximately **20 minutes** to complete.",
+      "uf_correct": true
+    }
+  ]
+}

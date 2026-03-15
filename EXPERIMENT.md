@@ -140,3 +140,35 @@ The flat summary preserved all the "big" facts (database version, auth algorithm
 **Next:** Fix the empty-cluster bug. Run with Sonnet for model invariance check.
 
 ---
+
+### Trial 3: Sonnet 4.6, 200 messages (long)
+
+**Model:** claude-sonnet-4-6
+**Date:** 2026-03-14
+**Flat:** 28/40 (70%)
+**UF:** 31/40 (78%)
+**p = 0.4531. FAIL TO REJECT H₀.**
+**Cohen's g = 0.214** (small effect)
+
+Discordant pairs: 7 total. 5 favored UF, 2 favored Flat.
+
+UF-only correct (5): Q19 (deploy approval), Q31 (iOS minimum), Q32 (TCA state management), Q34 (deep link scheme), Q40 (batch cron).
+Flat-only correct (2): Q16 (CI runner image), Q29 (error rate threshold).
+
+**Diagnosis:** Sonnet is a better summarizer. Its flat summary preserved facts that Haiku's flat summary dropped (Q14 freshness_score, Q23 webhook path, Q27 scrape interval, Q38 Avro format all now correct for flat). The flat accuracy went from 65% (Haiku) to 70% (Sonnet). UF went from 82% to 78%.
+
+The gap narrowed because the better model narrows the bottleneck. Union-find's structural advantage is largest when the summarizer is the constraint — when a single summary must compress too many facts and the LLM drops some. A better LLM drops fewer. A perfect LLM would drop none and the gap would vanish.
+
+**Cross-trial summary:**
+
+| Trial | Model | Flat | UF | p | Verdict |
+|---|---|---|---|---|---|
+| 1 | Haiku, 50msg | 90% | 90% | 1.000 | No difference |
+| 2 | Haiku, 200msg | 65% | 82% | 0.039 | **UF wins** |
+| 3 | Sonnet, 200msg | 70% | 78% | 0.453 | Directional, not significant |
+
+**Interpretation:** The effect is real but model-dependent. Union-find compaction outperforms flat summarization when compression pressure exceeds the summarizer's capacity. A better summarizer raises the threshold before the gap appears. The structural advantage — per-cluster summaries preserving local details — is most valuable with cheap/fast models, which is the realistic case for production context management (you don't want to spend Sonnet-tier compute on compaction).
+
+The honest claim: **union-find compaction is a hedge against summarizer quality.** It provides a structural floor on recall that flat summarization cannot guarantee.
+
+---
