@@ -172,3 +172,32 @@ The gap narrowed because the better model narrows the bottleneck. Union-find's s
 The honest claim: **union-find compaction is a hedge against summarizer quality.** It provides a structural floor on recall that flat summarization cannot guarantee.
 
 ---
+
+### Design notes: v2 improvements
+
+Trials 1-3 tested the naive spec. The naive version dumps ALL cold summaries into context — no retrieval. This misses the key architectural advantage: the e-class structure IS an index, and you should query it, not dump it.
+
+**Audit of user's improvement list:**
+
+| Improvement | Status in v1 | v2 change |
+|---|---|---|
+| Union-find as index structure | Have it, but not used as index — dump all clusters | **Add retrieval path** |
+| E-class root as cache key for summaries | Have it (`_summaries[root_id]`) | Rename for clarity |
+| Union = cheap LLM merge call | Have it | No change |
+| Incremental vs batch compaction | **Batch** — compact all at once when over budget | **Switch to incremental** — compact on each graduation |
+| Compound cache (identity vs value) | Have it (hot/cold) | No change |
+| Recent window verbatim | Have it | No change |
+| Retrieval: embed → nearest class → inject | **Missing** — v1 dumps all cold | **Add retrieve(query, k)** |
+| Cross-session persistence | Missing | **Add SQLite serialization** |
+
+**The two changes that matter for the experiment:**
+
+1. **Retrieval path.** Instead of `render() = all cold + hot`, do `render(query) = top-k relevant cold + hot`. The query is the most recent user message. This changes the comparison: flat has one opaque summary you can't query; UF has an index you can search. This is the real architectural advantage.
+
+2. **Incremental compaction.** On each graduation, find the nearest existing e-class and union if similarity > threshold. Otherwise insert as new singleton. This avoids the batch `find_closest_pair` loop and produces semantically tighter clusters.
+
+**What this changes about the experiment:**
+
+The control (flat) stays the same: one summary of all cold messages. The treatment (UF) becomes: embed the question, retrieve top-k cold e-classes by centroid similarity, inject those summaries + hot. The comparison is now flat-dump vs structured-retrieval. This is a fairer test of the thesis — the advantage isn't "multiple summaries vs one summary", it's "indexed retrieval vs opaque blob."
+
+---
