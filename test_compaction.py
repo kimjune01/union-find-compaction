@@ -1,13 +1,12 @@
 """Tests for union-find context compaction."""
 
-from compaction import Forest, compact_context, find_closest_pair
+from compaction import ContextWindow, Forest, find_closest_pair
 
 
 class StubEmbedder:
     """Returns a deterministic embedding based on content hash."""
 
     def embed(self, text: str) -> list[float]:
-        # Simple: use char ordinals mod 10 as a 4-dim vector
         h = [ord(c) % 10 for c in text[:4]]
         while len(h) < 4:
             h.append(0)
@@ -25,9 +24,18 @@ def make_forest() -> Forest:
     return Forest(StubEmbedder(), StubSummarizer())
 
 
+def make_window(hot_size: int = 5, max_cold: int = 3) -> ContextWindow:
+    return ContextWindow(StubEmbedder(), StubSummarizer(), hot_size, max_cold)
+
+
+# ---------------------------------------------------------------------------
+# Forest tests
+# ---------------------------------------------------------------------------
+
+
 def test_insert_creates_singleton():
     f = make_forest()
-    mid = f.insert("hello")
+    mid = f.insert(0, "hello")
     assert mid == 0
     assert f.size() == 1
     assert f.cluster_count() == 1
@@ -36,14 +44,14 @@ def test_insert_creates_singleton():
 
 def test_find_returns_self_for_singleton():
     f = make_forest()
-    mid = f.insert("hello")
+    mid = f.insert(0, "hello")
     assert f.find(mid) == mid
 
 
 def test_union_merges_two_singletons():
     f = make_forest()
-    a = f.insert("AGPL requires derivative works to share source")
-    b = f.insert("Copyleft is irrevocable")
+    a = f.insert(0, "AGPL requires derivative works to share source")
+    b = f.insert(1, "Copyleft is irrevocable")
     root = f.union(a, b)
     assert f.cluster_count() == 1
     assert f.find(a) == root
@@ -53,8 +61,8 @@ def test_union_merges_two_singletons():
 
 def test_union_generates_summary():
     f = make_forest()
-    a = f.insert("message one")
-    b = f.insert("message two")
+    a = f.insert(0, "message one")
+    b = f.insert(1, "message two")
     root = f.union(a, b)
     summary = f.summary(root)
     assert summary is not None
@@ -64,8 +72,8 @@ def test_union_generates_summary():
 
 def test_compact_returns_summary():
     f = make_forest()
-    a = f.insert("alpha")
-    b = f.insert("beta")
+    a = f.insert(0, "alpha")
+    b = f.insert(1, "beta")
     root = f.union(a, b)
     text = f.compact(root)
     assert "alpha" in text
@@ -74,15 +82,15 @@ def test_compact_returns_summary():
 
 def test_compact_singleton_returns_content():
     f = make_forest()
-    a = f.insert("standalone message")
-    assert f.compact(a) == "standalone message"
+    f.insert(0, "standalone message")
+    assert f.compact(0) == "standalone message"
 
 
 def test_expand_returns_originals():
     f = make_forest()
-    a = f.insert("first")
-    b = f.insert("second")
-    c = f.insert("third")
+    a = f.insert(0, "first")
+    b = f.insert(1, "second")
+    c = f.insert(2, "third")
     root = f.union(a, b)
     root = f.union(root, c)
     originals = f.expand(root)
@@ -91,14 +99,12 @@ def test_expand_returns_originals():
 
 def test_path_compression():
     f = make_forest()
-    ids = [f.insert(f"msg {i}") for i in range(5)]
-    # Chain: 0 <- 1 <- 2 <- 3 <- 4
+    ids = [f.insert(i, f"msg {i}") for i in range(5)]
     f.union(ids[0], ids[1])
     f.union(ids[1], ids[2])
     f.union(ids[2], ids[3])
     f.union(ids[3], ids[4])
     root = f.find(ids[4])
-    # After find with path compression, ids[4] should point directly to root
     assert f._nodes[ids[4]]._parent == root or f._nodes[ids[4]]._parent is None
 
 
@@ -117,46 +123,128 @@ def test_find_closest_pair():
 
     emb = ControlledEmbedder()
     emb.set("north", [1.0, 0.0, 0.0])
-    emb.set("northeast", [0.9, 0.1, 0.0])  # close to north
-    emb.set("south", [-1.0, 0.0, 0.0])  # far from both
+    emb.set("northeast", [0.9, 0.1, 0.0])
+    emb.set("south", [-1.0, 0.0, 0.0])
 
     f = Forest(emb, StubSummarizer())
-    f.insert("north")  # id 0
-    f.insert("northeast")  # id 1
-    f.insert("south")  # id 2
+    f.insert(0, "north")
+    f.insert(1, "northeast")
+    f.insert(2, "south")
     pair = find_closest_pair(f)
     assert pair is not None
     assert set(pair) == {0, 1}
 
 
-def test_compact_context_reduces_clusters():
-    f = make_forest()
-    for i in range(10):
-        f.insert(f"message {i}")
-    assert f.cluster_count() == 10
-    result = compact_context(f, max_clusters=3)
-    assert len(result) == 3
-    assert f.cluster_count() == 3
-
-
 def test_union_idempotent():
     f = make_forest()
-    a = f.insert("x")
-    b = f.insert("y")
+    a = f.insert(0, "x")
+    b = f.insert(1, "y")
     root1 = f.union(a, b)
     root2 = f.union(a, b)
     assert root1 == root2
     assert f.cluster_count() == 1
 
 
-def test_expand_after_compact_context():
-    f = make_forest()
-    ids = [f.insert(f"item {i}") for i in range(6)]
-    compact_context(f, max_clusters=2)
-    # All original messages should still be expandable
-    all_expanded = []
-    for root in f.roots():
-        all_expanded.extend(f.expand(root))
-    assert len(all_expanded) == 6
+# ---------------------------------------------------------------------------
+# ContextWindow tests
+# ---------------------------------------------------------------------------
+
+
+def test_messages_enter_hot():
+    w = make_window(hot_size=5)
+    for i in range(5):
+        w.append(f"msg {i}")
+    assert w.hot_count == 5
+    assert w.cold_cluster_count == 0
+
+
+def test_overflow_graduates_to_cold():
+    w = make_window(hot_size=3, max_cold=10)
+    for i in range(5):
+        w.append(f"msg {i}")
+    # 3 in hot, 2 graduated to cold
+    assert w.hot_count == 3
+    assert w.cold_cluster_count == 2
+    assert w.total_messages == 5
+
+
+def test_hot_preserves_recency():
+    w = make_window(hot_size=3, max_cold=10)
     for i in range(6):
-        assert f"item {i}" in all_expanded
+        w.append(f"msg {i}")
+    rendered = w.render()
+    # Last 3 messages are hot, appear at end in order
+    assert rendered[-3:] == ["msg 3", "msg 4", "msg 5"]
+
+
+def test_cold_compacts_when_over_budget():
+    w = make_window(hot_size=2, max_cold=2)
+    for i in range(10):
+        w.append(f"msg {i}")
+    # 2 hot, 8 graduated, cold compacted to <= 2 clusters
+    assert w.hot_count == 2
+    assert w.cold_cluster_count <= 2
+
+
+def test_render_has_cold_then_hot():
+    w = make_window(hot_size=3, max_cold=10)
+    for i in range(6):
+        w.append(f"msg {i}")
+    rendered = w.render()
+    # 3 cold singletons + 3 hot messages = 6 entries
+    assert len(rendered) == 6
+    # Hot tail is intact
+    assert rendered[-1] == "msg 5"
+    assert rendered[-2] == "msg 4"
+    assert rendered[-3] == "msg 3"
+
+
+def test_expand_cold_cluster():
+    w = make_window(hot_size=2, max_cold=1)
+    for i in range(6):
+        w.append(f"msg {i}")
+    # Everything except last 2 is cold, merged into 1 cluster
+    roots = w.forest.roots()
+    assert len(roots) == 1
+    originals = w.expand(roots[0])
+    # All 4 graduated messages are recoverable
+    assert len(originals) == 4
+    for i in range(4):
+        assert f"msg {i}" in originals
+
+
+def test_total_messages_tracks_all():
+    w = make_window(hot_size=3, max_cold=5)
+    for i in range(20):
+        w.append(f"msg {i}")
+    assert w.total_messages == 20
+
+
+def test_render_length_bounded():
+    """Context window render should never exceed hot_size + max_cold_clusters."""
+    w = make_window(hot_size=5, max_cold=3)
+    for i in range(100):
+        w.append(f"msg {i}")
+    rendered = w.render()
+    assert len(rendered) <= 5 + 3
+
+
+def test_single_message_stays_hot():
+    w = make_window(hot_size=5)
+    w.append("only message")
+    assert w.hot_count == 1
+    assert w.cold_cluster_count == 0
+    assert w.render() == ["only message"]
+
+
+def test_graduation_order_is_fifo():
+    """Oldest hot messages graduate first."""
+    w = make_window(hot_size=2, max_cold=10)
+    w.append("first")
+    w.append("second")
+    w.append("third")  # pushes "first" to cold
+    # "first" should be in cold, "second" and "third" in hot
+    hot_contents = [m.content for m in w._hot]
+    assert hot_contents == ["second", "third"]
+    cold_contents = [w.forest._nodes[mid].content for mid in w.forest._nodes]
+    assert "first" in cold_contents

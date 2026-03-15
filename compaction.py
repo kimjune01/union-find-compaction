@@ -1,8 +1,12 @@
-"""Union-find context compaction with LLM-generated cluster summaries."""
+"""Union-find context compaction with LLM-generated cluster summaries.
+
+Compound cache: recent messages stay intact in a hot window.
+Older messages graduate to a union-find forest for compaction.
+"""
 
 from __future__ import annotations
 
-import hashlib
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -42,15 +46,13 @@ class Forest:
         self._children: dict[int, list[int]] = {}  # root_id -> member ids
         self._embedder = embedder
         self._summarizer = summarizer
-        self._next_id = 0
 
     # -- Core operations --
 
-    def insert(self, content: str) -> int:
-        """Perceive: new message enters as singleton set."""
-        msg_id = self._next_id
-        self._next_id += 1
-        embedding = self._embedder.embed(content)
+    def insert(self, msg_id: int, content: str, embedding: list[float] | None = None) -> int:
+        """Add a message to the forest as a singleton set."""
+        if embedding is None:
+            embedding = self._embedder.embed(content)
         msg = Message(id=msg_id, content=content, embedding=embedding)
         self._nodes[msg_id] = msg
         self._children[msg_id] = [msg_id]
@@ -178,19 +180,87 @@ def find_closest_pair(forest: Forest) -> tuple[int, int] | None:
     return best_pair
 
 
-def compact_context(
-    forest: Forest,
-    max_clusters: int,
-) -> list[str]:
-    """Compact the forest until at most max_clusters remain.
+# ---------------------------------------------------------------------------
+# Compound cache: hot window + cold forest
+# ---------------------------------------------------------------------------
 
-    Returns the active context: summaries for merged clusters,
-    raw content for singletons.
+
+class ContextWindow:
+    """Compound cache for a conversation.
+
+    Two zones:
+    - Hot: the most recent `hot_size` messages, served raw, never compacted.
+    - Cold: everything older, managed by the union-find forest.
+
+    New messages enter hot. When hot overflows, the oldest message
+    graduates to cold. When cold has too many clusters, the closest
+    pair is merged and summarized.
+
+    render() returns the full context: cold summaries + hot messages,
+    in conversation order.
     """
-    while forest.cluster_count() > max_clusters:
-        pair = find_closest_pair(forest)
-        if pair is None:
-            break
-        forest.union(*pair)
 
-    return [forest.compact(root) for root in forest.roots()]
+    def __init__(
+        self,
+        embedder: Embedder,
+        summarizer: Summarizer,
+        hot_size: int = 20,
+        max_cold_clusters: int = 10,
+    ) -> None:
+        self._embedder = embedder
+        self._summarizer = summarizer
+        self._forest = Forest(embedder, summarizer)
+        self._hot: deque[Message] = deque()
+        self._hot_size = hot_size
+        self._max_cold_clusters = max_cold_clusters
+        self._next_id = 0
+
+    def append(self, content: str) -> int:
+        """Add a message. Enters hot; may push oldest to cold."""
+        msg_id = self._next_id
+        self._next_id += 1
+        embedding = self._embedder.embed(content)
+        msg = Message(id=msg_id, content=content, embedding=embedding)
+        self._hot.append(msg)
+
+        # Graduate oldest to cold when hot overflows
+        while len(self._hot) > self._hot_size:
+            graduated = self._hot.popleft()
+            self._forest.insert(graduated.id, graduated.content, graduated.embedding)
+            self._compact_cold()
+
+        return msg_id
+
+    def _compact_cold(self) -> None:
+        """Merge closest cold clusters until within budget."""
+        while self._forest.cluster_count() > self._max_cold_clusters:
+            pair = find_closest_pair(self._forest)
+            if pair is None:
+                break
+            self._forest.union(*pair)
+
+    def render(self) -> list[str]:
+        """Return the full context window: cold summaries then hot messages."""
+        cold = [self._forest.compact(r) for r in self._forest.roots()]
+        hot = [m.content for m in self._hot]
+        return cold + hot
+
+    def expand(self, root_id: int) -> list[str]:
+        """Reinflate a cold cluster to its source messages."""
+        return self._forest.expand(root_id)
+
+    @property
+    def hot_count(self) -> int:
+        return len(self._hot)
+
+    @property
+    def cold_cluster_count(self) -> int:
+        return self._forest.cluster_count()
+
+    @property
+    def total_messages(self) -> int:
+        return self._forest.size() + len(self._hot)
+
+    @property
+    def forest(self) -> Forest:
+        return self._forest

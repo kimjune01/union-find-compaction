@@ -18,9 +18,33 @@ Union-find is the right data structure for context compaction that preserves pro
 
 ## How It Works
 
-### Data model
+### Compound cache
 
-Each message entering the context window becomes an element in a union-find forest.
+The context window has two zones:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Context Window                           │
+│                                                              │
+│  ┌─────────────────────────┐  ┌───────────────────────────┐  │
+│  │      COLD (forest)      │  │      HOT (deque)          │  │
+│  │                         │  │                           │  │
+│  │  Compacted clusters,    │  │  Recent messages, raw,    │  │
+│  │  union-find managed,    │  │  never compacted.         │  │
+│  │  summaries + originals. │  │  FIFO: oldest graduates   │  │
+│  │                         │  │  to cold on overflow.     │  │
+│  └─────────────────────────┘  └───────────────────────────┘  │
+│         ↑ graduate                    ← append()             │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Hot zone** — A fixed-size deque of the most recent messages. Served raw. Never touched by the union-find. This preserves conversational recency: the last N turns are always intact, exactly as the user and model produced them.
+
+**Cold zone** — Everything older. Managed by the union-find forest. When hot overflows, the oldest message graduates to cold. When cold has too many clusters, the closest pair is merged and summarized by a cheap LLM.
+
+`render()` returns cold summaries + hot messages, in order. The model sees compressed history followed by full recent context.
+
+### Data model
 
 ```
 Message {
@@ -36,33 +60,37 @@ Message {
 
 ### Operations
 
-**1. Insert** — A new message arrives. It starts as its own singleton set.
+**1. Append** — A new message enters the hot zone. If hot exceeds capacity, the oldest message graduates to cold (FIFO).
 
-**2. Merge** — When context pressure exceeds a threshold, find the two closest clusters by centroid similarity and `union()` them. The merged cluster gets a new summary generated from all member messages. The original messages remain addressable through the root.
+**2. Graduate** — The oldest hot message is inserted into the cold forest as a singleton set. If cold now exceeds its cluster budget, the closest pair is merged.
 
-**3. Compact** — Replace a cluster's individual messages in the active context with the cluster's summary. The originals move to cold storage but remain linked to the root via `children`. The context window shrinks; provenance survives.
+**3. Union** — Find the two closest cold clusters by centroid similarity and `union()` them. The merged cluster gets a new summary from the cheap LLM. The original messages remain addressable through the root.
 
-**4. Expand** — On cache miss (the model needs detail that was compacted away), `find()` the cluster root, retrieve `children`, and reinflate the originals into context. This is the operation current compaction cannot do — once summarized, the originals are gone.
+**4. Compact** — Replace a cluster's individual messages in the rendered context with the cluster's summary. The originals stay in cold storage, linked to the root via `children`.
 
-**5. Consolidate** — After N compaction rounds, scan for clusters that keep getting merged together across sessions. These become schema candidates. A schema is a new node that links to its source clusters, inserted into the union-find as a persistent root. This is the bridge from compaction (cache eviction) to consolidation (changes future processing).
+**5. Expand** — On cache miss (the model needs detail that was compacted away), `find()` the cluster root, retrieve `children`, and reinflate the originals into context. This is the operation current compaction cannot do — once summarized, the originals are gone.
+
+**6. Consolidate** — After N compaction rounds, scan for clusters that keep getting merged together across sessions. These become schema candidates. A schema is a new node that links to its source clusters, inserted into the union-find as a persistent root. This is the bridge from compaction (cache eviction) to consolidation (changes future processing).
 
 ### The six-step mapping
 
 | Pipeline step | Union-find operation |
 |---|---|
-| **Perceive** | New message arrives, becomes singleton |
-| **Cache** | Indexed in the union-find forest |
-| **Filter** | Threshold similarity check decides merge candidates |
-| **Attend** | Select which clusters to compact (diversity-aware: keep dissimilar clusters expanded) |
+| **Perceive** | `append()`: message enters hot zone |
+| **Cache** | Hot deque holds recent; cold forest indexes older messages |
+| **Filter** | Threshold similarity check decides merge candidates in cold |
+| **Attend** | Select which cold clusters to compact (diversity-aware: keep dissimilar clusters expanded) |
 | **Consolidate** | Schema formation from repeatedly co-merged clusters |
 | **Remember** | Schemas persist across sessions; source messages remain traceable |
 
 ### Invariants
 
-1. **Provenance** — Every compacted summary traces back to source messages via `find()`. No orphaned summaries.
-2. **Reversibility** — Compaction is reversible (expand). Consolidation is not (schemas are additive, lossy, and change future processing). The data structure distinguishes between the two.
-3. **Amortized cost** — Union-find with path compression and union by rank gives near-O(1) amortized per operation. Context management stays cheap.
-4. **Traceability** — The constraint from [Consolidation](https://june.kim/consolidation): if you can't trace a schema back to the episodes that formed it, the merge was lossy and wrong. Union-find enforces this structurally.
+1. **Recency** — The last `hot_size` messages are always raw and intact. Compaction never touches them.
+2. **Provenance** — Every compacted summary traces back to source messages via `find()`. No orphaned summaries.
+3. **Reversibility** — Compaction is reversible (`expand()`). Consolidation is not (schemas are additive, lossy, and change future processing). The data structure distinguishes between the two.
+4. **Bounded render** — `render()` returns at most `hot_size + max_cold_clusters` entries. Context budget is predictable.
+5. **Amortized cost** — Union-find with path compression and union by rank gives near-O(1) amortized per operation. Context management stays cheap.
+6. **Traceability** — The constraint from [Consolidation](https://june.kim/consolidation): if you can't trace a schema back to the episodes that formed it, the merge was lossy and wrong. Union-find enforces this structurally.
 
 ## Why Not Just Summarize
 
@@ -88,48 +116,61 @@ Union-find adds one layer of structure — the parent pointer — and gets all f
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│              Active Context Window           │
-│  ┌───┐ ┌───┐ ┌─────────┐ ┌───┐ ┌───┐      │
-│  │m12│ │m13│ │ s[7-11] │ │m14│ │m15│      │
-│  └───┘ └───┘ └────┬────┘ └───┘ └───┘      │
-│                    │                         │
-│         ┌──────────┴──────────┐              │
-│         │  Compacted cluster  │              │
-│         │  root: s[7-11]      │              │
-│         │  children: 7,8,9,   │              │
-│         │           10,11     │              │
-│         └─────────────────────┘              │
-└─────────────────────────────────────────────┘
-                     │ expand()
-                     ▼
-┌─────────────────────────────────────────────┐
-│              Cold Storage                    │
-│  ┌───┐ ┌───┐ ┌───┐ ┌────┐ ┌────┐          │
-│  │m7 │ │m8 │ │m9 │ │m10 │ │m11 │          │
-│  └───┘ └───┘ └───┘ └────┘ └────┘          │
-└─────────────────────────────────────────────┘
-                     │ consolidate() — after repeated co-merging
-                     ▼
-┌─────────────────────────────────────────────┐
-│              Schema Store                    │
-│  ┌──────────────────────────────────┐       │
-│  │ Schema: "copyleft propagates     │       │
-│  │  through compilation"            │       │
-│  │ sources: [s[7-11], s[22-25],     │       │
-│  │           s[41-43]]              │       │
-│  └──────────────────────────────────┘       │
-└─────────────────────────────────────────────┘
+                          append("new msg")
+                                │
+                                ▼
+┌──────────────────────────────────────────────────────────┐
+│  HOT ZONE (deque, size=20)                               │
+│                                                          │
+│  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐  ...  ┌─────────┐  │
+│  │m81 │ │m82 │ │m83 │ │m84 │ │m85 │       │ new msg │  │
+│  └────┘ └────┘ └────┘ └────┘ └────┘       └─────────┘  │
+│    ↓ graduate (FIFO: oldest out when full)               │
+└──┬───────────────────────────────────────────────────────┘
+   │
+   ▼
+┌──────────────────────────────────────────────────────────┐
+│  COLD ZONE (union-find forest, max_clusters=10)          │
+│                                                          │
+│  ┌─────────────┐  ┌──────┐  ┌─────────────┐  ┌──────┐  │
+│  │ s[1-8]      │  │ m42  │  │ s[50-60]    │  │ m71  │  │
+│  │ "setup and  │  │(solo)│  │ "debugging  │  │(solo)│  │
+│  │  deploy..." │  │      │  │  the auth..." │  │      │  │
+│  └──────┬──────┘  └──────┘  └──────┬──────┘  └──────┘  │
+│         │                          │                     │
+│    ┌────┴────┐                ┌────┴────┐                │
+│    │ sources │  expand()      │ sources │  expand()      │
+│    │ 1,2,3,  │◄──────────    │ 50,51,  │◄──────────    │
+│    │ 4,5,6,  │                │ 52,...  │                │
+│    │ 7,8     │                │ 59,60   │                │
+│    └─────────┘                └─────────┘                │
+└──────────────────────────────────────────────────────────┘
+   │
+   │ consolidate() — after repeated co-merging across sessions
+   ▼
+┌──────────────────────────────────────────────────────────┐
+│  SCHEMA STORE (persistent)                               │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Schema: "copyleft propagates through compilation"  │  │
+│  │ sources: [s[1-8], s[50-60], s[120-125]]            │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
+
+`render()` returns: cold summaries (compressed history) + hot messages (recent, raw).
 
 ## Implementation Plan
 
-### Phase 1: Union-find with compaction
+### Phase 1: Union-find with compound cache
 
-- [ ] Union-find data structure with path compression and union by rank
-- [ ] Embedding-based similarity for merge candidate selection
-- [ ] LLM-generated summaries for cluster roots
-- [ ] Expand operation to reinflate compacted clusters
+- [x] Union-find data structure with path compression and union by rank
+- [x] Compound cache: hot deque (recent, raw) + cold forest (compacted)
+- [x] FIFO graduation from hot to cold on overflow
+- [x] Embedding-based similarity for merge candidate selection
+- [x] LLM-generated summaries for cluster roots (Summarizer protocol)
+- [x] Expand operation to reinflate compacted clusters
+- [x] Bounded render: cold summaries + hot messages
 - [ ] Integration with a chat loop (stdin/stdout MVP)
 
 ### Phase 2: Consolidation
