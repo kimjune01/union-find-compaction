@@ -35,6 +35,7 @@ from fixtures_long import CONVERSATION_LONG, FACTS_LONG
 HOT_SIZE = 10
 MAX_COLD_CLUSTERS = 10
 MERGE_THRESHOLD = 0.15
+RETRIEVE_K = 3
 RETRIEVE_MIN_SIM = 0.05
 
 # ---------------------------------------------------------------------------
@@ -254,8 +255,6 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
     print()
 
     # Ask questions — UF retrieves per-question
-    RETRIEVE_K = 3
-    RETRIEVE_SIM = RETRIEVE_MIN_SIM
     results: list[TrialResult] = []
     for i, fact in enumerate(facts):
         q = fact["question"]
@@ -264,7 +263,7 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
         print(f"Q{i + 1:2d} [{topic:6s}] {q}")
 
         # UF: retrieve top-k e-classes relevant to this question
-        uf_ctx = window.render(query=q, k=RETRIEVE_K, min_sim=RETRIEVE_SIM)
+        uf_ctx = window.render(query=q, k=RETRIEVE_K, min_sim=RETRIEVE_MIN_SIM)
 
         flat_ans = ask_question(client, model, flat_ctx, q)
         uf_ans = ask_question(client, model, uf_ctx, q)
