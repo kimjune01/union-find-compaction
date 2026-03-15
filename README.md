@@ -159,4 +159,4 @@ Union-find adds one layer of structure — the parent pointer — and gets all f
 
 ## License
 
-MIT
+AGPL-3.0 — see [LICENSE](LICENSE).
