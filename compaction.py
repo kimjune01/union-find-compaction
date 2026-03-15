@@ -1,13 +1,18 @@
 """Union-find context compaction with LLM-generated cluster summaries.
 
-Compound cache: recent messages stay intact in a hot window.
-Older messages graduate to a union-find forest for compaction.
+v2: incremental compaction + retrieval path.
+
+E-class roots are cache keys for summaries. Union = cheap LLM merge.
+Graduation merges into nearest e-class if similar enough, else creates
+a new singleton. Retrieval embeds a query and returns top-k e-classes.
 """
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 
@@ -32,18 +37,31 @@ class Message:
     _rank: int = 0  # union-find rank
 
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 class Forest:
     """Union-find forest over chat messages.
 
     Each message starts as a singleton set. Union merges two sets and
     generates a summary for the merged cluster via a cheap LLM. Find
     returns the cluster root with path compression.
+
+    E-class = equivalence class = the set of messages sharing a root.
+    The root ID is the cache key for the summary.
     """
 
     def __init__(self, embedder: Embedder, summarizer: Summarizer) -> None:
         self._nodes: dict[int, Message] = {}
         self._summaries: dict[int, str] = {}  # root_id -> summary
         self._children: dict[int, list[int]] = {}  # root_id -> member ids
+        self._centroids: dict[int, list[float]] = {}  # root_id -> centroid
         self._embedder = embedder
         self._summarizer = summarizer
 
@@ -56,6 +74,7 @@ class Forest:
         msg = Message(id=msg_id, content=content, embedding=embedding)
         self._nodes[msg_id] = msg
         self._children[msg_id] = [msg_id]
+        self._centroids[msg_id] = list(embedding)
         return msg_id
 
     def find(self, msg_id: int) -> int:
@@ -68,9 +87,9 @@ class Forest:
         return root
 
     def union(self, id_a: int, id_b: int) -> int:
-        """Merge two clusters. Summarizer generates the new cluster summary.
+        """Merge two e-classes. Summarizer generates the new summary.
 
-        Returns the root of the merged cluster.
+        Returns the root of the merged e-class.
         """
         root_a = self.find(id_a)
         root_b = self.find(id_b)
@@ -92,92 +111,124 @@ class Forest:
         members_b = self._children.pop(root_b, [])
         self._children.setdefault(root_a, []).extend(members_b)
 
-        # Summarize merged cluster via cheap LLM
+        # Update centroid (weighted average)
+        ca = self._centroids.pop(root_a, [])
+        cb = self._centroids.pop(root_b, [])
+        na = len(self._children[root_a]) - len(members_b)
+        nb = len(members_b)
+        if ca and cb:
+            dim = len(ca)
+            self._centroids[root_a] = [
+                (ca[i] * na + cb[i] * nb) / (na + nb) for i in range(dim)
+            ]
+        elif ca:
+            self._centroids[root_a] = ca
+
+        # Summarize merged e-class via cheap LLM
         member_texts = [self._nodes[mid].content for mid in self._children[root_a]]
         self._summaries[root_a] = self._summarizer.summarize(member_texts)
 
         return root_a
 
     def compact(self, root_id: int) -> str:
-        """Return cluster summary for injection into active context.
-
-        The originals remain in cold storage, addressable via expand().
-        """
+        """Return e-class summary for injection into context."""
         root = self.find(root_id)
         if root not in self._summaries:
             return self._nodes[root].content
         return self._summaries[root]
 
     def expand(self, root_id: int) -> list[str]:
-        """Reinflate a compacted cluster to its source messages.
-
-        This is the operation flat summarization cannot do.
-        """
+        """Reinflate an e-class to its source messages."""
         root = self.find(root_id)
         member_ids = self._children.get(root, [root])
         return [self._nodes[mid].content for mid in member_ids]
 
+    # -- Retrieval --
+
+    def nearest(self, query_embedding: list[float], k: int = 3) -> list[int]:
+        """Return top-k e-class roots by cosine similarity to query."""
+        scored = []
+        for root in self._children:
+            centroid = self._centroids.get(root)
+            if centroid:
+                sim = _cosine_similarity(query_embedding, centroid)
+                scored.append((sim, root))
+        scored.sort(reverse=True)
+        return [root for _, root in scored[:k]]
+
+    def nearest_root(self, query_embedding: list[float]) -> tuple[int, float] | None:
+        """Return the single nearest e-class root and its similarity."""
+        best_sim = -1.0
+        best_root = None
+        for root in self._children:
+            centroid = self._centroids.get(root)
+            if centroid:
+                sim = _cosine_similarity(query_embedding, centroid)
+                if sim > best_sim:
+                    best_sim = sim
+                    best_root = root
+        if best_root is None:
+            return None
+        return best_root, best_sim
+
     # -- Queries --
 
     def roots(self) -> list[int]:
-        """All current cluster roots."""
+        """All current e-class roots."""
         return list(self._children.keys())
 
     def members(self, root_id: int) -> list[int]:
-        """Source message IDs for a cluster."""
+        """Source message IDs for an e-class."""
         root = self.find(root_id)
         return list(self._children.get(root, [root]))
 
     def summary(self, root_id: int) -> str | None:
-        """Cluster summary, or None if singleton."""
+        """E-class summary, or None if singleton."""
         root = self.find(root_id)
         return self._summaries.get(root)
 
     def size(self) -> int:
-        """Total messages in the forest."""
         return len(self._nodes)
 
     def cluster_count(self) -> int:
-        """Number of disjoint clusters."""
         return len(self._children)
 
+    # -- Persistence --
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = sum(x * x for x in a) ** 0.5
-    norm_b = sum(x * x for x in b) ** 0.5
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+    def save(self, path: str | Path) -> None:
+        """Serialize forest to JSON for cross-session persistence."""
+        data = {
+            "nodes": {
+                str(mid): {
+                    "content": m.content,
+                    "embedding": m.embedding,
+                    "parent": m._parent,
+                    "rank": m._rank,
+                }
+                for mid, m in self._nodes.items()
+            },
+            "summaries": {str(k): v for k, v in self._summaries.items()},
+            "children": {str(k): v for k, v in self._children.items()},
+            "centroids": {str(k): v for k, v in self._centroids.items()},
+        }
+        Path(path).write_text(json.dumps(data))
 
-
-def find_closest_pair(forest: Forest) -> tuple[int, int] | None:
-    """Find the two closest cluster roots by centroid similarity.
-
-    This is the merge candidate selector — the Filter step.
-    """
-    roots = forest.roots()
-    if len(roots) < 2:
-        return None
-
-    centroids: dict[int, list[float]] = {}
-    for root in roots:
-        member_ids = forest.members(root)
-        embeddings = [forest._nodes[mid].embedding for mid in member_ids]
-        dim = len(embeddings[0])
-        centroid = [sum(e[i] for e in embeddings) / len(embeddings) for i in range(dim)]
-        centroids[root] = centroid
-
-    best_sim = -1.0
-    best_pair = (roots[0], roots[1])
-    for i, ra in enumerate(roots):
-        for rb in roots[i + 1 :]:
-            sim = _cosine_similarity(centroids[ra], centroids[rb])
-            if sim > best_sim:
-                best_sim = sim
-                best_pair = (ra, rb)
-
-    return best_pair
+    def load(self, path: str | Path) -> None:
+        """Deserialize forest from JSON."""
+        data = json.loads(Path(path).read_text())
+        self._nodes = {}
+        for mid_str, info in data["nodes"].items():
+            mid = int(mid_str)
+            self._nodes[mid] = Message(
+                id=mid,
+                content=info["content"],
+                embedding=info["embedding"],
+                _parent=info["parent"],
+                _rank=info["rank"],
+            )
+        self._summaries = {int(k): v for k, v in data["summaries"].items()}
+        self._children = {int(k): v for k, v in data["children"].items()}
+        self._centroids = {int(k): v for k, v in data["centroids"].items()}
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +239,14 @@ def find_closest_pair(forest: Forest) -> tuple[int, int] | None:
 class ContextWindow:
     """Compound cache for a conversation.
 
-    Two zones:
-    - Hot: the most recent `hot_size` messages, served raw, never compacted.
-    - Cold: everything older, managed by the union-find forest.
+    Hot: most recent messages, verbatim. Never compacted.
+    Cold: older messages in a union-find forest of e-classes.
 
-    New messages enter hot. When hot overflows, the oldest message
-    graduates to cold. When cold has too many clusters, the closest
-    pair is merged and summarized.
-
-    render() returns the full context: cold summaries + hot messages,
-    in conversation order.
+    v2 changes from v1:
+    - Incremental compaction: graduating message merges into nearest
+      e-class if similarity > threshold, else creates new singleton.
+    - Retrieval: render(query) embeds the query and returns top-k
+      relevant cold e-classes + hot messages.
     """
 
     def __init__(
@@ -206,6 +255,7 @@ class ContextWindow:
         summarizer: Summarizer,
         hot_size: int = 20,
         max_cold_clusters: int = 10,
+        merge_threshold: float = 0.3,
     ) -> None:
         self._embedder = embedder
         self._summarizer = summarizer
@@ -213,40 +263,72 @@ class ContextWindow:
         self._hot: deque[Message] = deque()
         self._hot_size = hot_size
         self._max_cold_clusters = max_cold_clusters
+        self._merge_threshold = merge_threshold
         self._next_id = 0
 
     def append(self, content: str) -> int:
-        """Add a message. Enters hot; may push oldest to cold."""
+        """Add a message. Enters hot; oldest graduates to cold."""
         msg_id = self._next_id
         self._next_id += 1
         embedding = self._embedder.embed(content)
         msg = Message(id=msg_id, content=content, embedding=embedding)
         self._hot.append(msg)
 
-        # Graduate oldest to cold when hot overflows
         while len(self._hot) > self._hot_size:
             graduated = self._hot.popleft()
-            self._forest.insert(graduated.id, graduated.content, graduated.embedding)
-            self._compact_cold()
+            self._graduate(graduated)
 
         return msg_id
 
-    def _compact_cold(self) -> None:
-        """Merge closest cold clusters until within budget."""
-        while self._forest.cluster_count() > self._max_cold_clusters:
-            pair = find_closest_pair(self._forest)
-            if pair is None:
-                break
-            self._forest.union(*pair)
+    def _graduate(self, msg: Message) -> None:
+        """Incremental compaction: merge into nearest e-class or create new."""
+        self._forest.insert(msg.id, msg.content, msg.embedding)
 
-    def render(self) -> list[str]:
-        """Return the full context window: cold summaries then hot messages."""
-        cold = [self._forest.compact(r) for r in self._forest.roots()]
+        if self._forest.cluster_count() <= 1:
+            return
+
+        # Find nearest existing e-class (excluding the singleton we just inserted)
+        match = self._forest.nearest_root(msg.embedding)
+        if match is None:
+            return
+
+        nearest_root, sim = match
+        # Don't merge with self
+        if nearest_root == msg.id:
+            # Find second-nearest
+            scored = []
+            for root in self._forest.roots():
+                if root == msg.id:
+                    continue
+                centroid = self._forest._centroids.get(root)
+                if centroid:
+                    s = _cosine_similarity(msg.embedding, centroid)
+                    scored.append((s, root))
+            if not scored:
+                return
+            scored.sort(reverse=True)
+            sim, nearest_root = scored[0]
+
+        if sim >= self._merge_threshold:
+            self._forest.union(msg.id, nearest_root)
+
+    def render(self, query: str | None = None, k: int = 3) -> list[str]:
+        """Return context: retrieved cold e-classes + hot messages.
+
+        If query is provided, embed it and retrieve top-k cold e-classes.
+        If query is None, return all cold summaries (v1 behavior).
+        """
+        if query is not None and self._forest.cluster_count() > 0:
+            query_emb = self._embedder.embed(query)
+            top_roots = self._forest.nearest(query_emb, k)
+            cold = [self._forest.compact(r) for r in top_roots]
+        else:
+            cold = [self._forest.compact(r) for r in self._forest.roots()]
+
         hot = [m.content for m in self._hot]
         return cold + hot
 
     def expand(self, root_id: int) -> list[str]:
-        """Reinflate a cold cluster to its source messages."""
         return self._forest.expand(root_id)
 
     @property
@@ -264,3 +346,32 @@ class ContextWindow:
     @property
     def forest(self) -> Forest:
         return self._forest
+
+
+# ---------------------------------------------------------------------------
+# Compat: v1 helpers still used by some tests
+# ---------------------------------------------------------------------------
+
+
+def find_closest_pair(forest: Forest) -> tuple[int, int] | None:
+    """Find the two closest e-class roots by centroid similarity."""
+    roots = forest.roots()
+    if len(roots) < 2:
+        return None
+
+    best_sim = -1.0
+    best_pair = (roots[0], roots[1])
+    for i, ra in enumerate(roots):
+        ca = forest._centroids.get(ra)
+        if not ca:
+            continue
+        for rb in roots[i + 1 :]:
+            cb = forest._centroids.get(rb)
+            if not cb:
+                continue
+            sim = _cosine_similarity(ca, cb)
+            if sim > best_sim:
+                best_sim = sim
+                best_pair = (ra, rb)
+
+    return best_pair

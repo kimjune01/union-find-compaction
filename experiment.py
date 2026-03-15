@@ -134,15 +134,16 @@ def run_flat(conversation: list[str], summarizer: ClaudeSummarizer) -> list[str]
 # ---------------------------------------------------------------------------
 
 
-def run_unionfind(
+def build_window(
     conversation: list[str],
     embedder: TFIDFEmbedder,
     summarizer: ClaudeSummarizer,
-) -> list[str]:
+) -> ContextWindow:
+    """Build the compound cache. Retrieval happens per-question."""
     window = ContextWindow(embedder, summarizer, HOT_SIZE, MAX_COLD_CLUSTERS)
     for msg in conversation:
         window.append(msg)
-    return window.render()
+    return window
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +235,13 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
     flat_ctx = run_flat(conversation, summarizer)
     print(f"  Done in {time.time() - t0:.1f}s. Entries: {len(flat_ctx)}")
 
-    print("Building union-find context...")
+    print("Building union-find index...")
     t0 = time.time()
-    uf_ctx = run_unionfind(conversation, embedder, summarizer)
-    print(f"  Done in {time.time() - t0:.1f}s. Entries: {len(uf_ctx)}")
+    window = build_window(conversation, embedder, summarizer)
+    print(f"  Done in {time.time() - t0:.1f}s. E-classes: {window.cold_cluster_count}")
     print()
 
-    # Log rendered contexts (full, for reproducibility)
+    # Log flat context
     print("-" * 60)
     print("FLAT CONTEXT:")
     print("-" * 60)
@@ -248,20 +249,17 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
         print(f"  [{i}] {entry[:150].replace(chr(10), ' ')}")
     print()
 
-    print("-" * 60)
-    print("UNION-FIND CONTEXT:")
-    print("-" * 60)
-    for i, entry in enumerate(uf_ctx):
-        print(f"  [{i}] {entry[:150].replace(chr(10), ' ')}")
-    print()
-
-    # Ask questions
+    # Ask questions — UF retrieves per-question
+    RETRIEVE_K = 3
     results: list[TrialResult] = []
     for i, fact in enumerate(facts):
         q = fact["question"]
         expected = fact["answer"]
         topic = fact["topic"]
         print(f"Q{i + 1:2d} [{topic:6s}] {q}")
+
+        # UF: retrieve top-k e-classes relevant to this question
+        uf_ctx = window.render(query=q, k=RETRIEVE_K)
 
         flat_ans = ask_question(client, model, flat_ctx, q)
         uf_ans = ask_question(client, model, uf_ctx, q)
