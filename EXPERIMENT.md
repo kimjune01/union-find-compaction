@@ -106,3 +106,37 @@ The thesis is that union-find wins when flat summarization must compress *aggres
 **Next:** Increase conversation length to stress the flat summarizer. At 200+ cold messages, a single summary must drop details. Union-find's per-cluster summaries should retain more because each cluster summary covers fewer messages.
 
 ---
+
+### Trial 2: Haiku, 200 messages (long)
+
+**Model:** claude-haiku-4-5-20251001
+**Date:** 2026-03-14
+**Flat:** 26/40 (65%)
+**UF:** 33/40 (82%)
+**p = 0.0391. REJECT H₀. Union-find > Flat.**
+**Cohen's g = 0.389** (medium effect)
+
+Discordant pairs: 9 total. 8 favored UF, 1 favored Flat.
+
+The 8 questions UF got that Flat missed:
+- Q14 (search ranking criterion): freshness_score — flat summary dropped it
+- Q18 (artifact retention): 90 days — flat summary dropped it
+- Q21 (payment processor detail): "with Connect for marketplace payouts" — flat had "Stripe" but missed the specificity
+- Q23 (webhook endpoint): /api/v3/webhooks/stripe — flat summary dropped it entirely
+- Q27 (scrape interval): 15 seconds — flat summary dropped it
+- Q29 (error rate threshold): 5% over 5 minutes — flat summary dropped it
+- Q33 (offline sync): "with vector clocks" — flat had "last-write-wins" but missed the specificity
+- Q40 (batch job schedule): cron expression — flat summary dropped it
+
+The 1 question Flat got that UF missed:
+- Q35 (app binary size): 35MB — UF's clustering happened to merge the mobile message into a cluster that lost this detail in summarization
+
+**Diagnosis:** At 190 cold messages, the flat summary must compress ~4000 tokens into ~500. Details that appear once in the conversation get dropped. Union-find's 5 clusters each summarize ~38 messages — each cluster summary preserves more of its local facts.
+
+The flat summary preserved all the "big" facts (database version, auth algorithm, search engine) but dropped "small" facts (scrape intervals, webhook paths, cron schedules). These are exactly the details a developer needs mid-session.
+
+**Bug observed:** UF context entry [1] was "I don't see any conversation messages provided in your request" — the summarizer received an empty or malformed input for one cluster. This is a bug in how filler-only clusters get summarized. One cluster was entirely filler messages, and the summarizer had nothing substantive to extract. This did not affect recall (no facts were in that cluster) but it wastes a context slot.
+
+**Next:** Fix the empty-cluster bug. Run with Sonnet for model invariance check.
+
+---

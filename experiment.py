@@ -350,7 +350,7 @@ def analyze(results: list[TrialResult], tag: str) -> None:
     # Save raw data
     outfile = f"results-{tag}.json"
     raw = {
-        "model": model,
+        "tag": tag,
         "hot_size": HOT_SIZE,
         "max_cold_clusters": MAX_COLD_CLUSTERS,
         "flat_accuracy": flat_score / n,
