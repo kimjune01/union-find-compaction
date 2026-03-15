@@ -1,0 +1,197 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "hot_size": 10,
+  "max_cold_clusters": 5,
+  "flat_accuracy": 0.9,
+  "uf_accuracy": 0.9,
+  "mcnemar": {
+    "a": 17,
+    "b": 1,
+    "c": 1,
+    "d": 1
+  },
+  "p_value": 1.0,
+  "verdict": "FAIL_TO_REJECT",
+  "trials": [
+    {
+      "question": "What version of PostgreSQL is the project using?",
+      "topic": "setup",
+      "expected": "16.2",
+      "flat_answer": "PostgreSQL 16.2 (upgraded from version 15)",
+      "flat_correct": true,
+      "uf_answer": "PostgreSQL 16.2 (upgraded from version 15)",
+      "uf_correct": true
+    },
+    {
+      "question": "What port is the database running on?",
+      "topic": "setup",
+      "expected": "5433",
+      "flat_answer": "The database is running on port 5433.",
+      "flat_correct": true,
+      "uf_answer": "5433",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the name of the database schema?",
+      "topic": "setup",
+      "expected": "tenant_core",
+      "flat_answer": "tenant_core",
+      "flat_correct": true,
+      "uf_answer": "tenant_core",
+      "uf_correct": true
+    },
+    {
+      "question": "What ORM version is being used?",
+      "topic": "setup",
+      "expected": "SQLAlchemy 2.0.35",
+      "flat_answer": "SQLAlchemy 2.0.35 (pinned to avoid breaking changes in 2.1)",
+      "flat_correct": true,
+      "uf_answer": "SQLAlchemy version 2.0.35",
+      "uf_correct": true
+    },
+    {
+      "question": "Which file contained the async bug?",
+      "topic": "bug",
+      "expected": "auth_handler.py",
+      "flat_answer": "auth_handler.py",
+      "flat_correct": true,
+      "uf_answer": "auth_handler.py",
+      "uf_correct": true
+    },
+    {
+      "question": "What line number was the missing await on?",
+      "topic": "bug",
+      "expected": "247",
+      "flat_answer": "Line 247.",
+      "flat_correct": true,
+      "uf_answer": "Line 247.",
+      "uf_correct": true
+    },
+    {
+      "question": "What exception type was being raised by the async bug?",
+      "topic": "bug",
+      "expected": "RuntimeError: coroutine was never awaited",
+      "flat_answer": "RuntimeError",
+      "flat_correct": false,
+      "uf_answer": "RuntimeError: coroutine was never awaited",
+      "uf_correct": true
+    },
+    {
+      "question": "What was the root cause of the auth bug?",
+      "topic": "bug",
+      "expected": "verify_token was called without await so it returned a coroutine object instead of a bool",
+      "flat_answer": "The root cause of the auth bug was that `verify_token` is called without `await` on an async function at line 247 in auth_handler.py, causing a RuntimeError. The coroutine object returned is truthy, which causes intermittent failures.",
+      "flat_correct": true,
+      "uf_answer": "The root cause of the auth bug was that the `verify_token` function is called without `await` in `auth_handler.py` at line 247, causing it to return a coroutine object that always evaluates as truthy, making authentication intermittent (failing only when tokens are actually invalid and throwing RuntimeError: coroutine was never awaited).",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the API rate limit per key?",
+      "topic": "api",
+      "expected": "150 requests per minute",
+      "flat_answer": "150 requests per minute rate limit per API key.",
+      "flat_correct": true,
+      "uf_answer": "150 requests per minute per API key.",
+      "uf_correct": true
+    },
+    {
+      "question": "What authentication scheme does the API use?",
+      "topic": "api",
+      "expected": "HMAC-SHA256 with rotating keys",
+      "flat_answer": "The API uses HMAC-SHA256 rotating keys (no bearer tokens).",
+      "flat_correct": true,
+      "uf_answer": "The API uses HMAC-SHA256 authentication with rotating keys (no bearer tokens).",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the path for the batch inference endpoint?",
+      "topic": "api",
+      "expected": "/v2/batch/infer",
+      "flat_answer": "/v2/batch/infer",
+      "flat_correct": true,
+      "uf_answer": "/v2/batch/infer",
+      "uf_correct": true
+    },
+    {
+      "question": "What format does the batch endpoint return results in?",
+      "topic": "api",
+      "expected": "NDJSON streaming with a final summary object",
+      "flat_answer": "NDJSON-streamed results.",
+      "flat_correct": false,
+      "uf_answer": "NDJSON streaming results.",
+      "uf_correct": false
+    },
+    {
+      "question": "What is the staging server IP address?",
+      "topic": "deploy",
+      "expected": "10.0.3.47",
+      "flat_answer": "The staging server IP address is 10.0.3.47.",
+      "flat_correct": true,
+      "uf_answer": "10.0.3.47",
+      "uf_correct": true
+    },
+    {
+      "question": "What SSH port does the staging server use?",
+      "topic": "deploy",
+      "expected": "2222",
+      "flat_answer": "2222",
+      "flat_correct": true,
+      "uf_answer": "2222",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the path to the deploy script?",
+      "topic": "deploy",
+      "expected": "/opt/deploy/run_migration.sh",
+      "flat_answer": "/opt/deploy/run_migration.sh",
+      "flat_correct": true,
+      "uf_answer": "/opt/deploy/run_migration.sh",
+      "uf_correct": true
+    },
+    {
+      "question": "What is the rollback command?",
+      "topic": "deploy",
+      "expected": "kubectl rollout undo deployment/api-server --to-revision=3",
+      "flat_answer": "The rollback command is:\n\n```\nkubectl rollout undo deployment/api-server --to-revision=3\n```",
+      "flat_correct": true,
+      "uf_answer": "kubectl rollout undo deployment/api-server --to-revision=3",
+      "uf_correct": true
+    },
+    {
+      "question": "Which function has the race condition?",
+      "topic": "review",
+      "expected": "merge_accounts",
+      "flat_answer": "merge_accounts",
+      "flat_correct": true,
+      "uf_answer": "merge_accounts",
+      "uf_correct": true
+    },
+    {
+      "question": "What balance threshold triggers the race condition?",
+      "topic": "review",
+      "expected": "10000",
+      "flat_answer": "10000",
+      "flat_correct": true,
+      "uf_answer": "10000",
+      "uf_correct": true
+    },
+    {
+      "question": "What type of lock was proposed to fix the race condition?",
+      "topic": "review",
+      "expected": "SELECT FOR UPDATE SKIP LOCKED",
+      "flat_answer": "SELECT FOR UPDATE SKIP LOCKED",
+      "flat_correct": true,
+      "uf_answer": "SELECT FOR UPDATE SKIP LOCKED on ledger_entries rows.",
+      "uf_correct": true
+    },
+    {
+      "question": "What table does the merge_accounts function write to?",
+      "topic": "review",
+      "expected": "ledger_entries",
+      "flat_answer": "ledger_entries",
+      "flat_correct": true,
+      "uf_answer": "NOT FOUND\n\nThe conversation mentions that a race condition occurs in the \"ledger_entries table\" during the merge_accounts function, but it does not explicitly state that merge_accounts writes to the ledger_entries table. The conversation only indicates that the fix involves using SELECT FOR UPDATE SKIP LOCKED on ledger_entries rows.",
+      "uf_correct": false
+    }
+  ]
+}

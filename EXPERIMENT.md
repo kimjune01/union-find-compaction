@@ -85,3 +85,24 @@ With 20 questions, McNemar's exact test can detect a difference when the discord
 Observations, surprises, and course corrections logged below as the experiment runs.
 
 ---
+
+### Trial 1: Haiku, 50 messages
+
+**Model:** claude-haiku-4-5-20251001
+**Date:** 2026-03-14
+**Flat:** 18/20 (90%)
+**UF:** 18/20 (90%)
+**p = 1.0000. FAIL TO REJECT H₀.**
+
+Discordant pairs: 1 each way.
+- Q7 (bug exception type): Flat missed full error string, UF got it.
+- Q20 (ledger_entries table): UF missed it, Flat got it.
+- Q12 (NDJSON format): Both missed the "final summary object" detail.
+
+**Diagnosis:** 50 messages is too easy. The flat summarizer compresses 40 cold messages into one paragraph and preserves nearly every planted fact — because 40 messages fit comfortably in a single summary call. The LLM is good enough at extractive summarization that nothing meaningful is lost at this scale.
+
+The thesis is that union-find wins when flat summarization must compress *aggressively* — when the cold zone is too large for one summary to capture everything. At 40 messages, there's no compression pressure. The flat summary is ~300 tokens; the facts are sparse enough to survive.
+
+**Next:** Increase conversation length to stress the flat summarizer. At 200+ cold messages, a single summary must drop details. Union-find's per-cluster summaries should retain more because each cluster summary covers fewer messages.
+
+---
