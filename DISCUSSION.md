@@ -25,12 +25,15 @@ Union-find's per-cluster summaries each cover ~20–40 messages instead of 190. 
 
 ### Summarizer quality narrows the gap
 
-| Summarizer | Flat | UF | Gap |
-|---|---|---|---|
-| Haiku (cheap) | 62–65% | 80–82% | 17pp |
-| Sonnet (expensive) | 70% | 78% | 8pp |
+| Summarizer | Answerer | Flat | UF | Gap |
+|---|---|---|---|---|
+| Haiku (cheap) | Haiku | 62–72% | 80–90% | 15–18pp |
+| Sonnet (expensive) | Sonnet | 70% | 78% | 8pp |
+| Haiku (cheap) | Sonnet | 75% | 90% | 15pp |
 
-A better model makes a better flat summary. Sonnet's flat preserved facts that Haiku's flat dropped (freshness_score, webhook path, scrape interval, Avro format). The gap shrank from 17pp to 8pp.
+A better model makes a better flat summary. Sonnet's flat preserved facts that Haiku's flat dropped (freshness_score, webhook path, scrape interval, Avro format). When Sonnet does everything, the gap shrank from 17pp to 8pp.
+
+But trial 7 tested the production-realistic split: cheap model summarizes, expensive model answers. The gap stayed at 15pp. Sonnet is better at extracting facts from the context it receives (flat went from 72% to 75%), but it can't extract facts the Haiku summary dropped. The bottleneck is the summarizer, not the answerer.
 
 A perfect summarizer would preserve everything in a single pass, and the gap would vanish. Union-find's advantage is structural: it reduces the per-summary compression ratio. When the model is the bottleneck, structure compensates. When the model is sufficient, structure is redundant.
 

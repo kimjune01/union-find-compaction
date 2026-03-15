@@ -357,7 +357,50 @@ UF's 3 misses were all retrieval failures: Q5 (db migration window landed in a c
 | 4 | Haiku, 200msg | v2 retrieve | 68% | 82% | 0.180 | 66 | Directional |
 | 5 | Haiku, 200msg | v2 tuned | 62% | 80% | 0.065 | 10 | Directional (p=0.065) |
 | 6 | Haiku, 200msg | v3 timestamps | 72% | 90% | 0.092 | 10 | Directional (p=0.092) |
+| 7 | Sonnet answer + Haiku summarize, 200msg | v3 timestamps | 75% | 90% | 0.070 | 10 | Directional (p=0.070) |
 
 **UF's best result yet: 90%.** The 18pp gap is the widest since trial 2. But p-values remain above 0.05 because the retrieval path introduces 2-3 misses per trial that the dump-all approach wouldn't have. The pattern is clear: UF consistently wins, but 40 questions with k=3 retrieval doesn't produce enough discordant pairs for McNemar's to reach significance.
+
+---
+
+### Trial 7: Sonnet 4.6 answer + Haiku summarize, 200 messages, v3 (split-model production sim)
+
+**Answer/judge model:** claude-sonnet-4-6
+**Summarizer model:** claude-haiku-4-5-20251001
+**Date:** 2026-03-15
+**Params:** merge_threshold=0.15, max_cold_clusters=10, retrieve_k=3, retrieve_min_sim=0.05, timestamps=ISO-8601
+**Flat:** 30/40 (75%)
+**UF:** 36/40 (90%)
+**p = 0.0703. FAIL TO REJECT H₀.**
+**Cohen's g = 0.375** (medium effect)
+
+**E-classes: 10.** Same clustering as trials 5-6 — summarizer model doesn't affect TF-IDF clustering.
+
+Discordant pairs: 8 total. 7 favored UF, 1 favored Flat.
+
+UF-only correct (7): Q14 (freshness_score), Q19 (deploy 2 approvals), Q20 (build timeout 45min), Q28 (PagerDuty 5-min escalation), Q29 (error threshold 5%/5min), Q34 (myapp:// deep link), Q40 (batch cron 0 4 * * *).
+
+Flat-only correct (1): Q21 (Stripe Connect — billing cluster not retrieved, same retrieval miss as trials 5-6).
+
+Per-topic:
+
+| Topic | Flat | UF |
+|---|---|---|
+| db | 5/5 | 5/5 |
+| auth | 5/5 | 5/5 |
+| search | 4/5 | 5/5 |
+| ci | 3/5 | **5/5** |
+| billing | 4/5 | 3/5 |
+| monitor | 3/5 | **5/5** |
+| mobile | 3/5 | 4/5 |
+| data | 3/5 | 4/5 |
+
+**Diagnosis:** This trial isolates the production-realistic case: cheap model (Haiku) does the background compaction work, expensive model (Sonnet) does the user-facing answering and judging.
+
+Sonnet as answerer raised flat from 72% (trial 6, Haiku answers) to 75%. It's better at extracting facts from the context it receives. But it can't extract facts the Haiku summary dropped — the bottleneck is the summarizer, not the answerer. UF held at 90% because per-cluster summaries (each covering ~20 messages) are within Haiku's competence even when a 190-message blob isn't.
+
+The split confirms the thesis from the Discussion: **UF is a hedge against summarizer quality.** When the summarizer is cheap and the conversation is long, per-cluster structure preserves facts that a single flat summary drops. A better answerer downstream doesn't compensate.
+
+Q21 (Stripe Connect) failed for the third consecutive trial — the billing cluster centroid doesn't match "payment processor" phrasing well enough for top-3 retrieval. This is the same TF-IDF retrieval limitation noted in trial 5. Dense embeddings would likely fix it.
 
 ---

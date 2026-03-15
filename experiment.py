@@ -8,6 +8,7 @@ Usage:
     python3 experiment.py                          # default: haiku
     python3 experiment.py --model claude-sonnet-4-5-20250929
     python3 experiment.py --model claude-haiku-4-5-20251001
+    python3 experiment.py --model claude-sonnet-4-6 --summarizer-model claude-haiku-4-5-20251001
 """
 
 from __future__ import annotations
@@ -219,18 +220,20 @@ class TrialResult:
     uf_correct: bool
 
 
-def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
+def run_experiment(model: str, long: bool = False, summarizer_model: str | None = None) -> list[TrialResult]:
     conversation = CONVERSATION_LONG if long else CONVERSATION
     timestamps = TIMESTAMPS_LONG if long else None
     facts = FACTS_LONG if long else FACTS
     client = anthropic.Anthropic()
     embedder = TFIDFEmbedder(conversation)
-    summarizer = ClaudeSummarizer(client, model)
+    sum_model = summarizer_model or model
+    summarizer = ClaudeSummarizer(client, sum_model)
 
     print("=" * 60)
     print("EXPERIMENT: Union-Find vs Flat Summarization")
     print("=" * 60)
     print(f"Model:       {model}")
+    print(f"Summarizer:  {sum_model}")
     print(f"Conversation: {len(conversation)} messages ({'long' if long else 'short'})")
     print(f"Hot window:  {HOT_SIZE} messages")
     print(f"Cold clusters: {MAX_COLD_CLUSTERS} (cap)")
@@ -396,7 +399,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Use 200-message conversation (40 facts) instead of 50-message (20 facts)",
     )
+    parser.add_argument(
+        "--summarizer-model",
+        default=None,
+        help="Model for summarization (defaults to --model). Use for split-model trials.",
+    )
     args = parser.parse_args()
-    tag = f"{args.model}{'-long' if args.long else ''}"
-    results = run_experiment(args.model, args.long)
+    sum_tag = f"-sum-{args.summarizer_model}" if args.summarizer_model else ""
+    tag = f"{args.model}{sum_tag}{'-long' if args.long else ''}"
+    results = run_experiment(args.model, args.long, args.summarizer_model)
     analyze(results, tag)
