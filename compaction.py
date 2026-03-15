@@ -1,10 +1,11 @@
 """Union-find context compaction with LLM-generated cluster summaries.
 
-v2: incremental compaction + retrieval path.
+v3: temporal stamping for recency-aware merge.
 
 E-class roots are cache keys for summaries. Union = cheap LLM merge.
 Graduation merges into nearest e-class if similar enough, else creates
 a new singleton. Retrieval embeds a query and returns top-k e-classes.
+Timestamps enable structural contradiction resolution in merge.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ class Message:
     id: int
     content: str
     embedding: list[float] = field(default_factory=list)
+    timestamp: str | None = None  # ISO-8601, for recency-aware merge
     _parent: int | None = None  # union-find parent (None = self)
     _rank: int = 0  # union-find rank
 
@@ -67,11 +69,17 @@ class Forest:
 
     # -- Core operations --
 
-    def insert(self, msg_id: int, content: str, embedding: list[float] | None = None) -> int:
+    def insert(
+        self,
+        msg_id: int,
+        content: str,
+        embedding: list[float] | None = None,
+        timestamp: str | None = None,
+    ) -> int:
         """Add a message to the forest as a singleton set."""
         if embedding is None:
             embedding = self._embedder.embed(content)
-        msg = Message(id=msg_id, content=content, embedding=embedding)
+        msg = Message(id=msg_id, content=content, embedding=embedding, timestamp=timestamp)
         self._nodes[msg_id] = msg
         self._children[msg_id] = [msg_id]
         self._centroids[msg_id] = list(embedding)
@@ -125,7 +133,19 @@ class Forest:
             self._centroids[root_a] = ca
 
         # Summarize merged e-class via cheap LLM
-        member_texts = [self._nodes[mid].content for mid in self._children[root_a]]
+        # Sort by timestamp so summarizer sees chronological order
+        member_ids = self._children[root_a]
+        sorted_ids = sorted(
+            member_ids,
+            key=lambda mid: self._nodes[mid].timestamp or "",
+        )
+        member_texts = []
+        for mid in sorted_ids:
+            node = self._nodes[mid]
+            if node.timestamp:
+                member_texts.append(f"[{node.timestamp}] {node.content}")
+            else:
+                member_texts.append(node.content)
         self._summaries[root_a] = self._summarizer.summarize(member_texts)
 
         return root_a
@@ -208,6 +228,7 @@ class Forest:
                 str(mid): {
                     "content": m.content,
                     "embedding": m.embedding,
+                    "timestamp": m.timestamp,
                     "parent": m._parent,
                     "rank": m._rank,
                 }
@@ -229,6 +250,7 @@ class Forest:
                 id=mid,
                 content=info["content"],
                 embedding=info["embedding"],
+                timestamp=info.get("timestamp"),
                 _parent=info["parent"],
                 _rank=info["rank"],
             )
@@ -272,12 +294,12 @@ class ContextWindow:
         self._merge_threshold = merge_threshold
         self._next_id = 0
 
-    def append(self, content: str) -> int:
+    def append(self, content: str, timestamp: str | None = None) -> int:
         """Add a message. Enters hot; oldest graduates to cold."""
         msg_id = self._next_id
         self._next_id += 1
         embedding = self._embedder.embed(content)
-        msg = Message(id=msg_id, content=content, embedding=embedding)
+        msg = Message(id=msg_id, content=content, embedding=embedding, timestamp=timestamp)
         self._hot.append(msg)
 
         while len(self._hot) > self._hot_size:
@@ -293,7 +315,7 @@ class ContextWindow:
         2. Merge into nearest e-class if similarity > threshold.
         3. Enforce hard cap: force-merge closest pairs until under limit.
         """
-        self._forest.insert(msg.id, msg.content, msg.embedding)
+        self._forest.insert(msg.id, msg.content, msg.embedding, msg.timestamp)
 
         if self._forest.cluster_count() <= 1:
             return

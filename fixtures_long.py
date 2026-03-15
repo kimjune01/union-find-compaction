@@ -3,7 +3,11 @@
 Designed to create compression pressure. At 190 cold messages,
 a single flat summary must drop details. Union-find's per-cluster
 summaries each cover ~25 messages — less compression per cluster.
+
+v3: timestamps for each message (2026-03-14 workday, ~2.4 min apart).
 """
+
+from datetime import datetime, timedelta, timezone
 
 # 8 topics, 5 facts each = 40 facts.
 
@@ -61,8 +65,12 @@ FACTS_LONG = [
 assert len(FACTS_LONG) == 40
 
 
-def _generate_conversation() -> list[str]:
-    """Build a 200-message conversation with facts planted at specified indices."""
+def _generate_conversation() -> tuple[list[str], list[str]]:
+    """Build a 200-message conversation with facts planted at specified indices.
+
+    Returns (messages, timestamps) — parallel lists.
+    Timestamps span a workday: 2026-03-14 09:00–17:00 UTC, ~2.4 min apart.
+    """
 
     # Fact content by index for easy lookup
     fact_at: dict[int, str] = {}
@@ -168,19 +176,26 @@ def _generate_conversation() -> list[str]:
     ]
 
     conversation = []
+    timestamps = []
     filler_idx = 0
+    start = datetime(2026, 3, 14, 9, 0, 0, tzinfo=timezone.utc)
+    interval = timedelta(seconds=480 / 200 * 60)  # ~2.4 min apart over 8 hours
+
     for i in range(200):
+        ts = start + interval * i
+        timestamps.append(ts.strftime("%Y-%m-%dT%H:%M:%SZ"))
         if i in fact_at:
             conversation.append(fact_at[i])
         else:
             conversation.append(fillers[filler_idx % len(fillers)])
             filler_idx += 1
 
-    return conversation
+    return conversation, timestamps
 
 
-CONVERSATION_LONG = _generate_conversation()
+CONVERSATION_LONG, TIMESTAMPS_LONG = _generate_conversation()
 assert len(CONVERSATION_LONG) == 200
+assert len(TIMESTAMPS_LONG) == 200
 
 # Verify all fact indices are valid
 for fact in FACTS_LONG:

@@ -26,7 +26,7 @@ import anthropic
 
 from compaction import ContextWindow, Forest, find_closest_pair
 from fixtures import CONVERSATION, FACTS
-from fixtures_long import CONVERSATION_LONG, FACTS_LONG
+from fixtures_long import CONVERSATION_LONG, FACTS_LONG, TIMESTAMPS_LONG
 
 # ---------------------------------------------------------------------------
 # Config
@@ -108,9 +108,12 @@ class ClaudeSummarizer:
                     "role": "user",
                     "content": (
                         "Summarize these conversation messages into one concise paragraph. "
+                        "Messages may include timestamps in [ISO-8601] format. When messages "
+                        "contradict each other, ALWAYS prefer the more recent timestamp. "
                         "PRESERVE ALL specific details: version numbers, port numbers, file names, "
                         "line numbers, IP addresses, exact commands, function names, threshold values. "
-                        "Do not omit any concrete fact.\n\n" + numbered
+                        "Do not omit any concrete fact. Drop filler and acknowledgments.\n\n"
+                        + numbered
                     ),
                 }
             ],
@@ -141,11 +144,13 @@ def build_window(
     conversation: list[str],
     embedder: TFIDFEmbedder,
     summarizer: ClaudeSummarizer,
+    timestamps: list[str] | None = None,
 ) -> ContextWindow:
     """Build the compound cache. Retrieval happens per-question."""
     window = ContextWindow(embedder, summarizer, HOT_SIZE, MAX_COLD_CLUSTERS, MERGE_THRESHOLD)
-    for msg in conversation:
-        window.append(msg)
+    for i, msg in enumerate(conversation):
+        ts = timestamps[i] if timestamps else None
+        window.append(msg, timestamp=ts)
     return window
 
 
@@ -216,6 +221,7 @@ class TrialResult:
 
 def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
     conversation = CONVERSATION_LONG if long else CONVERSATION
+    timestamps = TIMESTAMPS_LONG if long else None
     facts = FACTS_LONG if long else FACTS
     client = anthropic.Anthropic()
     embedder = TFIDFEmbedder(conversation)
@@ -242,7 +248,7 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
 
     print("Building union-find index...")
     t0 = time.time()
-    window = build_window(conversation, embedder, summarizer)
+    window = build_window(conversation, embedder, summarizer, timestamps)
     print(f"  Done in {time.time() - t0:.1f}s. E-classes: {window.cold_cluster_count}")
     print()
 
