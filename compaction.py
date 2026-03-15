@@ -145,14 +145,20 @@ class Forest:
 
     # -- Retrieval --
 
-    def nearest(self, query_embedding: list[float], k: int = 3) -> list[int]:
-        """Return top-k e-class roots by cosine similarity to query."""
+    def nearest(
+        self, query_embedding: list[float], k: int = 3, min_sim: float = 0.0
+    ) -> list[int]:
+        """Return top-k e-class roots by cosine similarity to query.
+
+        Only returns roots with similarity >= min_sim.
+        """
         scored = []
         for root in self._children:
             centroid = self._centroids.get(root)
             if centroid:
                 sim = _cosine_similarity(query_embedding, centroid)
-                scored.append((sim, root))
+                if sim >= min_sim:
+                    scored.append((sim, root))
         scored.sort(reverse=True)
         return [root for _, root in scored[:k]]
 
@@ -281,7 +287,12 @@ class ContextWindow:
         return msg_id
 
     def _graduate(self, msg: Message) -> None:
-        """Incremental compaction: merge into nearest e-class or create new."""
+        """Incremental compaction with batch fallback.
+
+        1. Insert as singleton.
+        2. Merge into nearest e-class if similarity > threshold.
+        3. Enforce hard cap: force-merge closest pairs until under limit.
+        """
         self._forest.insert(msg.id, msg.content, msg.embedding)
 
         if self._forest.cluster_count() <= 1:
@@ -312,15 +323,25 @@ class ContextWindow:
         if sim >= self._merge_threshold:
             self._forest.union(msg.id, nearest_root)
 
-    def render(self, query: str | None = None, k: int = 3) -> list[str]:
+        # Batch fallback: enforce hard cap on cluster count
+        while self._forest.cluster_count() > self._max_cold_clusters:
+            pair = find_closest_pair(self._forest)
+            if pair is None:
+                break
+            self._forest.union(*pair)
+
+    def render(
+        self, query: str | None = None, k: int = 3, min_sim: float = 0.05
+    ) -> list[str]:
         """Return context: retrieved cold e-classes + hot messages.
 
-        If query is provided, embed it and retrieve top-k cold e-classes.
-        If query is None, return all cold summaries (v1 behavior).
+        If query is provided, embed it and retrieve top-k cold e-classes
+        with similarity >= min_sim. If query is None, return all cold
+        summaries (v1 behavior).
         """
         if query is not None and self._forest.cluster_count() > 0:
             query_emb = self._embedder.embed(query)
-            top_roots = self._forest.nearest(query_emb, k)
+            top_roots = self._forest.nearest(query_emb, k, min_sim=min_sim)
             cold = [self._forest.compact(r) for r in top_roots]
         else:
             cold = [self._forest.compact(r) for r in self._forest.roots()]

@@ -33,7 +33,9 @@ from fixtures_long import CONVERSATION_LONG, FACTS_LONG
 # ---------------------------------------------------------------------------
 
 HOT_SIZE = 10
-MAX_COLD_CLUSTERS = 5
+MAX_COLD_CLUSTERS = 10
+MERGE_THRESHOLD = 0.15
+RETRIEVE_MIN_SIM = 0.05
 
 # ---------------------------------------------------------------------------
 # Deterministic TF-IDF embedder (no API, reproducible)
@@ -140,7 +142,7 @@ def build_window(
     summarizer: ClaudeSummarizer,
 ) -> ContextWindow:
     """Build the compound cache. Retrieval happens per-question."""
-    window = ContextWindow(embedder, summarizer, HOT_SIZE, MAX_COLD_CLUSTERS)
+    window = ContextWindow(embedder, summarizer, HOT_SIZE, MAX_COLD_CLUSTERS, MERGE_THRESHOLD)
     for msg in conversation:
         window.append(msg)
     return window
@@ -224,7 +226,9 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
     print(f"Model:       {model}")
     print(f"Conversation: {len(conversation)} messages ({'long' if long else 'short'})")
     print(f"Hot window:  {HOT_SIZE} messages")
-    print(f"Cold clusters: {MAX_COLD_CLUSTERS}")
+    print(f"Cold clusters: {MAX_COLD_CLUSTERS} (cap)")
+    print(f"Merge thresh: {MERGE_THRESHOLD}")
+    print(f"Retrieve k:  {RETRIEVE_K}, min_sim: {RETRIEVE_MIN_SIM}")
     print(f"Embedding:   TF-IDF (deterministic, {embedder._dim} dims)")
     print(f"Questions:   {len(facts)}")
     print()
@@ -251,6 +255,7 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
 
     # Ask questions — UF retrieves per-question
     RETRIEVE_K = 3
+    RETRIEVE_SIM = RETRIEVE_MIN_SIM
     results: list[TrialResult] = []
     for i, fact in enumerate(facts):
         q = fact["question"]
@@ -259,7 +264,7 @@ def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
         print(f"Q{i + 1:2d} [{topic:6s}] {q}")
 
         # UF: retrieve top-k e-classes relevant to this question
-        uf_ctx = window.render(query=q, k=RETRIEVE_K)
+        uf_ctx = window.render(query=q, k=RETRIEVE_K, min_sim=RETRIEVE_SIM)
 
         flat_ans = ask_question(client, model, flat_ctx, q)
         uf_ans = ask_question(client, model, uf_ctx, q)

@@ -283,3 +283,44 @@ def test_graduation_order_is_fifo():
     w.append("third")
     hot_contents = [m.content for m in w._hot]
     assert hot_contents == ["second", "third"]
+
+
+def test_hard_cap_enforced():
+    """Batch fallback force-merges when cluster count exceeds cap."""
+    w = make_window(hot_size=2, max_cold=3, threshold=1.0)  # threshold=1.0: never merge incrementally
+    # Graduate 6 messages — each becomes a singleton, but cap=3 forces merges
+    for i in range(8):
+        w.append(f"topic_{i} message")
+    assert w.cold_cluster_count <= 3
+
+
+def test_retrieve_min_sim_filters():
+    """Clusters below min_sim should not be returned."""
+
+    class ControlledEmbedder:
+        def __init__(self):
+            self._map: dict[str, list[float]] = {}
+
+        def set(self, text: str, vec: list[float]):
+            self._map[text] = vec
+
+        def embed(self, text: str) -> list[float]:
+            return self._map.get(text, [0.0, 0.0])
+
+    emb = ControlledEmbedder()
+    emb.set("close", [1.0, 0.0])
+    emb.set("far", [-1.0, 0.0])
+    emb.set("hot1", [0.5, 0.5])
+    emb.set("hot2", [0.5, 0.5])
+    emb.set("query", [0.9, 0.1])
+
+    w = ContextWindow(emb, StubSummarizer(), hot_size=2, max_cold_clusters=10, merge_threshold=1.0)
+    w.append("close")
+    w.append("far")
+    w.append("hot1")
+    w.append("hot2")
+
+    # With high min_sim, "far" should be filtered out
+    ctx = w.render(query="query", k=10, min_sim=0.5)
+    # Should have 1 cold (close) + 2 hot = 3
+    assert len(ctx) == 3
