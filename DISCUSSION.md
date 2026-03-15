@@ -157,15 +157,52 @@ Timestamps also enable time-range retrieval. "What did we discuss this morning?"
 
 The cost is negligible: one ISO-8601 string per message. The benefit compounds with every feature that depends on recency — contradiction resolution, staleness detection, time-range queries, cross-session ordering.
 
+## Recommendations
+
+Seven trials in, here's what I'd actually build and what I'd skip.
+
+### Ship the compound cache, skip the retrieval path for now
+
+The dump-all approach (trial 2) gave the strongest signal: p=0.039, the only trial that cleared alpha. The retrieval path (trials 4-7) consistently introduced 1-3 misses per run from TF-IDF centroid mismatch — questions phrased differently than the cluster's vocabulary. Every retrieval miss is a fact you had but failed to serve.
+
+The practical move: dump all cold clusters when the total render fits within the model's context budget. That's the common case — 10 cluster summaries plus 10 hot messages is maybe 3000 tokens. You only need retrieval when cold clusters exceed what fits, and most conversations won't get there.
+
+Retrieval becomes worth it when you switch to dense embeddings and the cold zone grows past what fits. But that's an optimization for later, not a launch blocker.
+
+### Use this with cheap models, not expensive ones
+
+Trial 3 (Sonnet everything) showed an 8pp gap. Trial 7 (Haiku summarizes, Sonnet answers) showed 15pp. The structural advantage scales inversely with summarizer quality. If you're already paying for Sonnet-tier compaction, the flat summary is probably good enough.
+
+The sweet spot is Haiku or smaller for summarization, whatever model you want for answering. UF makes the cheap summarizer punch above its weight by giving it 20-message chunks instead of a 190-message blob.
+
+### Dense embeddings are the highest-leverage next step
+
+The Q21 (Stripe Connect) retrieval miss appeared in three consecutive trials. The billing cluster centroid — dominated by "invoice", "dunning", "fee" terms in TF-IDF — doesn't match "payment processor" because the word overlap is zero. Dense embeddings would fix this and likely fix several other near-misses.
+
+TF-IDF was the right call for the experiment (deterministic, reproducible, zero API cost). It's the wrong call for production.
+
+### Don't bother increasing N yet
+
+The p-values hover around 0.07 with n=40. Yes, n=80 would likely clear alpha. But the practical question isn't "is the effect real" (it obviously is — 15-18pp across 5 trials with cheap models) but "does the architecture scale to real conversations." Running 80 synthetic questions answers a statistical question nobody is asking. Run it on a real exported coding session instead.
+
+### The expand operation is the underrated feature
+
+Every trial discussion focused on recall accuracy, but the most valuable operation hasn't been tested: `expand()`. When a model gets a vague answer from a cluster summary and needs the actual messages, flat summarization has nothing to offer. The originals are gone. UF can reinflate.
+
+This matters most for debugging conversations where the user asks "what exactly did I say about X?" — the summary says "discussed database migration details" but the user needs the specific ALTER TABLE statement from message 47. That's the use case where UF's provenance tracking pays off structurally, not just statistically.
+
+### Don't pursue cross-session consolidation until expand is validated
+
+The README's Phase 2 (schema formation from co-merged clusters) is the intellectually exciting part, but it's premature. If expand doesn't work well in practice — if users don't actually need to drill into compacted clusters — then the provenance tracking is academic and consolidation has no foundation to build on. Validate the expand loop first.
+
 ## Next steps
 
-1. **Temporal stamping**: Add timestamps to the Message dataclass and the merge prompt. Test whether explicit recency ordering improves contradiction resolution and retrieval.
-2. **Increase N**: 80 questions across 400 messages. The effect should clear alpha with the same magnitude.
-3. **Dense embeddings**: Replace TF-IDF with text-embedding-3-small for clustering and retrieval. Expected: tighter clusters, better retrieval, fewer singletons.
-4. **Adaptive injection**: Dump all when under token budget, retrieve when over. Best of both strategies.
-5. **Expand experiment**: Deliberately ask questions that require detail beyond the summary. Measure whether `expand()` recovers facts that `compact()` lost.
-6. **Real conversations**: Export a long coding session and run the same comparison. No planted facts — use the LLM judge to evaluate answer quality on naturally occurring questions.
-7. **Cross-session consolidation**: The actual thesis. Do clusters that repeatedly co-merge form useful schemas? Does schema-primed context outperform cold-start?
+1. ~~**Temporal stamping**: Add timestamps to the Message dataclass and the merge prompt. Test whether explicit recency ordering improves contradiction resolution and retrieval.~~ Done (trial 6).
+2. **Dense embeddings**: Replace TF-IDF with text-embedding-3-small for clustering and retrieval. Expected: tighter clusters, better retrieval, fewer singletons. Highest-leverage change.
+3. **Adaptive injection**: Dump all when under token budget, retrieve when over. Best of both strategies.
+4. **Expand experiment**: Deliberately ask questions that require detail beyond the summary. Measure whether `expand()` recovers facts that `compact()` lost.
+5. **Real conversations**: Export a long coding session and run the same comparison. No planted facts — use the LLM judge to evaluate answer quality on naturally occurring questions.
+6. **Cross-session consolidation**: The actual thesis. Do clusters that repeatedly co-merge form useful schemas? Does schema-primed context outperform cold-start? Contingent on expand validation.
 
 ## Acknowledgments
 
