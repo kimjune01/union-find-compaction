@@ -198,6 +198,22 @@ Union-find adds one layer of structure — the parent pointer — and gets all f
 - [Tompary & Davachi (2017)](https://doi.org/10.1016/j.cub.2017.05.041) — Overlapping memories reorganize into shared schemas
 - [Tarjan (1975)](https://doi.org/10.1145/321879.321884) — Union-find with path compression: near-O(1) amortized
 
+## Repository map
+
+| File | What it is |
+|---|---|
+| [`compaction.py`](compaction.py) | Core implementation: `Forest` (union-find with path compression), `ContextWindow` (compound cache with hot/cold zones), `Embedder`/`Summarizer` protocols |
+| [`test_compaction.py`](test_compaction.py) | Unit tests (pytest). Stub embedder/summarizer, no API calls |
+| [`experiment.py`](experiment.py) | Experiment harness: builds both conditions (flat vs UF), asks questions, scores with LLM judge, runs McNemar's test. Supports `--model`, `--summarizer-model`, `--long` |
+| [`fixtures.py`](fixtures.py) | Short synthetic conversation (50 messages, 5 topics, 20 planted facts) |
+| [`fixtures_long.py`](fixtures_long.py) | Long synthetic conversation (200 messages, 8 topics, 40 planted facts, timestamps) |
+| [`EXPERIMENT.md`](EXPERIMENT.md) | Pre-registration and lab notebook. Hypotheses, design, and per-trial observations for all 7 trials |
+| [`DISCUSSION.md`](DISCUSSION.md) | Cross-trial analysis, limitations, and recommendations for what to build next |
+| [`TUNING.md`](TUNING.md) | Notes on parameter tuning (merge threshold, cluster cap, retrieval k) |
+| `results-*.json` | Raw trial data: per-question answers, scores, and McNemar tables |
+
+Start with [EXPERIMENT.md](EXPERIMENT.md) for the research narrative, [DISCUSSION.md](DISCUSSION.md) for conclusions.
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE).
