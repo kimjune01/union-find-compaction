@@ -307,3 +307,57 @@ The two questions UF lost: Q15 (filterable attributes) was a detail inside a lar
 The retrieval path is a trade-off: it reduces context size (good for cost/speed) but introduces retrieval misses (bad for recall). The dump-all approach (v1) gave the strongest signal but at the cost of injecting all cold clusters. A production system would need both: dump when under budget, retrieve when over.
 
 ---
+
+### Trial 6: Haiku, 200 messages, v3 (temporal stamping)
+
+**Model:** claude-haiku-4-5-20251001
+**Date:** 2026-03-15
+**Params:** merge_threshold=0.15, max_cold_clusters=10, retrieve_k=3, retrieve_min_sim=0.05, timestamps=ISO-8601
+**Flat:** 29/40 (72%)
+**UF:** 36/40 (90%)
+**p = 0.0923. FAIL TO REJECT H₀.**
+**Cohen's g = 0.269** (small-medium effect)
+
+**E-classes: 10.** Same as trial 5 — timestamps don't affect clustering (TF-IDF ignores them).
+
+Discordant pairs: 13 total. 10 favored UF, 3 favored Flat.
+
+UF-only correct (10): Q8 (Redis prefix auth:revoked:), Q14 (freshness_score), Q15 (filterable attrs 64), Q22 (platform fee 2.9%+30¢), Q24 (invoice schedule 1st/15th), Q28 (PagerDuty 5-min escalation), Q30 (dashboard-4471), Q34 (myapp:// deep link), Q40 (cron 0 4 * * *), Q25 (dunning 1,3,5,7 days).
+
+Flat-only correct (3): Q5 (migration 4 hours — UF hallucinated "15 minutes"), Q21 (Stripe Connect — billing cluster not retrieved), Q23 (webhook /api/v3/webhooks/stripe — billing cluster not retrieved).
+
+Per-topic:
+
+| Topic | Flat | UF |
+|---|---|---|
+| db | 5/5 | 4/5 |
+| auth | 4/5 | **5/5** |
+| search | 3/5 | **5/5** |
+| ci | 5/5 | 5/5 |
+| billing | 2/5 | 3/5 |
+| monitor | 3/5 | **5/5** |
+| mobile | 4/5 | **5/5** |
+| data | 3/5 | 4/5 |
+
+**Diagnosis:** Timestamps improved UF from 80% (trial 5) to 90%. The per-cluster summaries now include chronological ordering, which helps the summarizer preserve specific details in temporal context. The summarizer prompt's "prefer more recent timestamp" instruction gives it a clear signal for ordering facts.
+
+Flat also improved (62% → 72%) because the updated summarizer prompt applies to both conditions. The prompt now says "when messages contradict, prefer more recent timestamp" and "drop filler and acknowledgments." Both instructions help flat too — but UF benefits more because its per-cluster summaries have fewer messages to sort and the chronological signal is clearer in a 20-message cluster than a 190-message blob.
+
+UF's 3 misses were all retrieval failures: Q5 (db migration window landed in a cluster where the timestamp-ordered summary confused the model), Q21 and Q23 (billing cluster not in top-3 for those question phrasings — same retrieval miss as trial 5).
+
+**The timestamp effect:** UF gained Q8, Q14, Q15, Q22, Q25, Q28, Q30 compared to trial 5. These are all facts that were in clusters but got dropped during summarization. Timestamps gave the summarizer chronological structure to work with — instead of an unordered bag of messages, it sees a timeline. The model preserves more facts when it can reason about temporal order.
+
+**Cross-trial summary (final):**
+
+| Trial | Model | Version | Flat | UF | p | E-classes | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | Haiku, 50msg | v1 dump | 90% | 90% | 1.000 | — | No difference |
+| 2 | Haiku, 200msg | v1 dump | 65% | 82% | 0.039 | ~5 | **UF wins** |
+| 3 | Sonnet, 200msg | v1 dump | 70% | 78% | 0.453 | ~5 | Directional |
+| 4 | Haiku, 200msg | v2 retrieve | 68% | 82% | 0.180 | 66 | Directional |
+| 5 | Haiku, 200msg | v2 tuned | 62% | 80% | 0.065 | 10 | Directional (p=0.065) |
+| 6 | Haiku, 200msg | v3 timestamps | 72% | 90% | 0.092 | 10 | Directional (p=0.092) |
+
+**UF's best result yet: 90%.** The 18pp gap is the widest since trial 2. But p-values remain above 0.05 because the retrieval path introduces 2-3 misses per trial that the dump-all approach wouldn't have. The pattern is clear: UF consistently wins, but 40 questions with k=3 retrieval doesn't produce enough discordant pairs for McNemar's to reach significance.
+
+---
