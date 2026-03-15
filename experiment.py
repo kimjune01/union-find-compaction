@@ -26,6 +26,7 @@ import anthropic
 
 from compaction import ContextWindow, Forest, find_closest_pair
 from fixtures import CONVERSATION, FACTS
+from fixtures_long import CONVERSATION_LONG, FACTS_LONG
 
 # ---------------------------------------------------------------------------
 # Config
@@ -209,31 +210,33 @@ class TrialResult:
     uf_correct: bool
 
 
-def run_experiment(model: str) -> list[TrialResult]:
+def run_experiment(model: str, long: bool = False) -> list[TrialResult]:
+    conversation = CONVERSATION_LONG if long else CONVERSATION
+    facts = FACTS_LONG if long else FACTS
     client = anthropic.Anthropic()
-    embedder = TFIDFEmbedder(CONVERSATION)
+    embedder = TFIDFEmbedder(conversation)
     summarizer = ClaudeSummarizer(client, model)
 
     print("=" * 60)
     print("EXPERIMENT: Union-Find vs Flat Summarization")
     print("=" * 60)
     print(f"Model:       {model}")
-    print(f"Conversation: {len(CONVERSATION)} messages")
+    print(f"Conversation: {len(conversation)} messages ({'long' if long else 'short'})")
     print(f"Hot window:  {HOT_SIZE} messages")
     print(f"Cold clusters: {MAX_COLD_CLUSTERS}")
     print(f"Embedding:   TF-IDF (deterministic, {embedder._dim} dims)")
-    print(f"Questions:   {len(FACTS)}")
+    print(f"Questions:   {len(facts)}")
     print()
 
     # Build contexts
     print("Building flat context...")
     t0 = time.time()
-    flat_ctx = run_flat(CONVERSATION, summarizer)
+    flat_ctx = run_flat(conversation, summarizer)
     print(f"  Done in {time.time() - t0:.1f}s. Entries: {len(flat_ctx)}")
 
     print("Building union-find context...")
     t0 = time.time()
-    uf_ctx = run_unionfind(CONVERSATION, embedder, summarizer)
+    uf_ctx = run_unionfind(conversation, embedder, summarizer)
     print(f"  Done in {time.time() - t0:.1f}s. Entries: {len(uf_ctx)}")
     print()
 
@@ -254,7 +257,7 @@ def run_experiment(model: str) -> list[TrialResult]:
 
     # Ask questions
     results: list[TrialResult] = []
-    for i, fact in enumerate(FACTS):
+    for i, fact in enumerate(facts):
         q = fact["question"]
         expected = fact["answer"]
         topic = fact["topic"]
@@ -286,7 +289,7 @@ def run_experiment(model: str) -> list[TrialResult]:
     return results
 
 
-def analyze(results: list[TrialResult], model: str) -> None:
+def analyze(results: list[TrialResult], tag: str) -> None:
     print("=" * 60)
     print("RESULTS")
     print("=" * 60)
@@ -345,7 +348,7 @@ def analyze(results: list[TrialResult], model: str) -> None:
         print(f"  {topic:8s}  Flat: {f_ok}/{len(tr)}  UF: {u_ok}/{len(tr)}")
 
     # Save raw data
-    outfile = f"results-{model}.json"
+    outfile = f"results-{tag}.json"
     raw = {
         "model": model,
         "hot_size": HOT_SIZE,
@@ -380,6 +383,12 @@ if __name__ == "__main__":
         default="claude-haiku-4-5-20251001",
         help="Anthropic model for summarize/answer/judge",
     )
+    parser.add_argument(
+        "--long",
+        action="store_true",
+        help="Use 200-message conversation (40 facts) instead of 50-message (20 facts)",
+    )
     args = parser.parse_args()
-    results = run_experiment(args.model)
-    analyze(results, args.model)
+    tag = f"{args.model}{'-long' if args.long else ''}"
+    results = run_experiment(args.model, args.long)
+    analyze(results, tag)
