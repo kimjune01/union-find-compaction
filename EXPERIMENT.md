@@ -404,3 +404,28 @@ The split confirms the thesis from the Discussion: **UF is a hedge against summa
 Q21 (Stripe Connect) failed for the third consecutive trial — the billing cluster centroid doesn't match "payment processor" phrasing well enough for top-3 retrieval. This is the same TF-IDF retrieval limitation noted in trial 5. Dense embeddings would likely fix it.
 
 ---
+
+## Port to gemini-cli (TypeScript)
+
+PR [#24736](https://github.com/google-gemini/gemini-cli/pull/24736) ports the algorithm to `google-gemini/gemini-cli`. The TypeScript implementation matches the Python original on all structural invariants: TF-IDF embedder, cosine similarity, union-by-rank with path compression, hot/cold partitioning, deferred summarization.
+
+The experiment was not re-run against the TypeScript port. The results above validate the algorithm; the port is validated by 80 unit tests covering the same operations.
+
+### Bugs found in the port (fixed 2026-04-14)
+
+Two P1 bugs were discovered via codex review that would have degraded recall below the experiment baseline:
+
+1. **Render before resolve.** `render()` was called before `resolveDirty()`, so merged cold clusters returned only the root node's content instead of a summary of all members. Non-root messages were silently dropped. This is equivalent to flat summarization's failure mode — the structure existed but wasn't being read. Fix: resolve dirty clusters before rendering.
+
+2. **Tool outputs reduced to name-only.** `functionResponse` parts were mapped to `[Tool response: ${name}]` before entering the context window, discarding the actual output. Error messages, file paths, and line numbers — exactly the "footnote facts" that UF is supposed to preserve — were lost before clustering even began. Fix: include a 500-character preview of the response content.
+
+Both bugs made the port strictly worse than the Python original. Post-fix, the port should match or exceed the experiment results because the algorithm is the same and the bugs were additive losses.
+
+### Additional hardening (not in original Python)
+
+- Prompt injection sanitization on all LLM-facing inputs (sanitizePromptInput)
+- AbortSignal propagation through the summarizer (rethrow on abort, don't swallow to fallback)
+- `getCompressionStrategy()` awaits experiment flag loading (was synchronous, could miss the flag)
+- MAX_DISTILLATION_SIZE reduced from 1M to 64K chars
+
+---
