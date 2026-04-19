@@ -1,6 +1,10 @@
-"""Tests for union-find context compaction v2."""
+"""Tests for union-find context compaction v4 (value-based eviction)."""
 
-from compaction import ContextWindow, Forest, _cosine_similarity, find_closest_pair
+import math
+from compaction import (
+    ContextWindow, Forest, ClusterMeta, AndersonEviction,
+    _cosine_similarity, _decay, _need, find_closest_pair,
+)
 
 
 class StubEmbedder:
@@ -286,9 +290,9 @@ def test_graduation_order_is_fifo():
 
 
 def test_hard_cap_enforced():
-    """Batch fallback force-merges when cluster count exceeds cap."""
+    """Value-based eviction keeps cluster count at or below cap."""
     w = make_window(hot_size=2, max_cold=3, threshold=1.0)  # threshold=1.0: never merge incrementally
-    # Graduate 6 messages — each becomes a singleton, but cap=3 forces merges
+    # Graduate 6 messages — each becomes a singleton, cap=3 forces eviction
     for i in range(8):
         w.append(f"topic_{i} message")
     assert w.cold_cluster_count <= 3
@@ -324,3 +328,203 @@ def test_retrieve_min_sim_filters():
     ctx = w.render(query="query", k=10, min_sim=0.5)
     # Should have 1 cold (close) + 2 hot = 3
     assert len(ctx) == 3
+
+
+# ---------------------------------------------------------------------------
+# Eviction policy unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_decay_at_zero():
+    """decay(0) = e^(-0.5) ≈ 0.607."""
+    assert abs(_decay(0) - math.e ** (-0.5)) < 1e-6
+
+
+def test_decay_monotonic():
+    """Decay decreases with elapsed time."""
+    assert _decay(0) > _decay(1) > _decay(10) > _decay(100)
+
+
+def test_need_applies_decay():
+    """Score always applies decay, even at elapsed=0."""
+    meta = ClusterMeta(strength=1.0, last_access_turn=5)
+    score = _need(meta, 5)  # same turn
+    assert score < 1.0
+    assert abs(score - 1.0 * _decay(0)) < 1e-6
+
+
+def test_graduation_metadata():
+    """Newly graduated clusters get strength=1.0 at current turn."""
+    policy = AndersonEviction()
+    meta = ClusterMeta()
+    policy.on_graduate(meta, current_turn=42)
+    assert meta.strength == 1.0
+    assert meta.last_access_turn == 42
+    assert meta.created_at_turn == 42
+
+
+def test_retrieval_boost():
+    """Retrieval adds 1.0 after decaying existing strength."""
+    policy = AndersonEviction()
+    meta = ClusterMeta(strength=1.0, last_access_turn=0)
+    policy.on_retrieve(meta, current_turn=10)
+    expected = 1.0 * _decay(10) + 1.0
+    assert abs(meta.strength - expected) < 1e-6
+    assert meta.last_access_turn == 10
+
+
+def test_retrieval_dedup_same_turn():
+    """Same-turn retrieval is skipped."""
+    policy = AndersonEviction()
+    meta = ClusterMeta(strength=1.0, last_access_turn=0)
+    policy.on_retrieve(meta, current_turn=5)
+    strength_after_first = meta.strength
+    policy.on_retrieve(meta, current_turn=5)
+    assert meta.strength == strength_after_first
+
+
+def test_retrieval_after_write_absorb_same_turn():
+    """Retrieval after write-absorb in the same turn should still count."""
+    policy = AndersonEviction()
+    meta = ClusterMeta(strength=1.0, last_access_turn=0)
+    policy.on_write_absorb(meta, current_turn=5)
+    strength_after_absorb = meta.strength
+    policy.on_retrieve(meta, current_turn=5)
+    # Retrieval should add a boost on top of the write-absorb
+    assert meta.strength > strength_after_absorb
+
+
+def test_write_absorb_boost():
+    """Write absorption adds 0.5 after decaying."""
+    policy = AndersonEviction()
+    meta = ClusterMeta(strength=1.0, last_access_turn=0)
+    policy.on_write_absorb(meta, current_turn=10)
+    expected = 1.0 * _decay(10) + 0.5
+    assert abs(meta.strength - expected) < 1e-6
+
+
+def test_strength_bounded_under_sustained_access():
+    """Consecutive-turn retrievals converge to ceiling ≈ 2.08."""
+    policy = AndersonEviction()
+    meta = ClusterMeta(strength=1.0, last_access_turn=0)
+    for t in range(1, 200):
+        policy.on_retrieve(meta, current_turn=t)
+    ceiling = 1.0 / (1.0 - _decay(1))
+    assert meta.strength < ceiling + 0.1
+    assert meta.strength > ceiling - 0.5
+
+
+def test_merge_combines_decayed_strengths():
+    """on_merge sums both decayed strengths."""
+    policy = AndersonEviction()
+    winner = ClusterMeta(strength=2.0, last_access_turn=10, created_at_turn=5)
+    loser = ClusterMeta(strength=1.5, last_access_turn=8, created_at_turn=3)
+    policy.on_merge(winner, loser, current_turn=20)
+    expected = 2.0 * _decay(10) + 1.5 * _decay(12)
+    assert abs(winner.strength - expected) < 1e-6
+    assert winner.last_access_turn == 10  # max of originals, not current_turn
+    assert winner.created_at_turn == 3  # min of originals
+
+
+def test_eviction_chooses_lowest_need():
+    """Eviction removes the lowest-scoring cluster, not the closest pair."""
+    class FixedEmbedder:
+        def __init__(self):
+            self._vecs = {}
+        def set(self, text, vec):
+            self._vecs[text] = vec
+        def embed(self, text):
+            return self._vecs.get(text, [0.0, 0.0, 0.0])
+
+    emb = FixedEmbedder()
+    # 3 cold clusters with distinct embeddings, cap=2
+    emb.set("old_topic", [1.0, 0.0, 0.0])
+    emb.set("new_topic_A", [0.0, 1.0, 0.0])
+    emb.set("new_topic_B", [0.0, 0.0, 1.0])
+    # Hot filler
+    emb.set("hot1", [0.3, 0.3, 0.3])
+    emb.set("hot2", [0.3, 0.3, 0.3])
+
+    w = ContextWindow(emb, StubSummarizer(), hot_size=2, max_cold_clusters=2, merge_threshold=1.0)
+
+    # old_topic graduates first (earliest, lowest turn)
+    w.append("old_topic", is_user=True)
+    w.append("new_topic_A", is_user=True)
+    w.append("new_topic_B", is_user=True)
+    w.append("hot1", is_user=True)
+    w.append("hot2", is_user=True)
+
+    # Cap=2, 3 cold clusters → one evicted. old_topic graduated earliest, most decayed.
+    assert w.cold_cluster_count <= 2
+    # old_topic should have been evicted (lowest need)
+    remaining_roots = w.forest.roots()
+    remaining_content = []
+    for r in remaining_roots:
+        remaining_content.extend(w.forest.expand(r))
+    # old_topic should be gone
+    assert "old_topic" not in remaining_content
+
+
+def test_eviction_deletes_all_cluster_data():
+    """After eviction, all member data is purged."""
+    f = make_forest()
+    a = f.insert(0, "first", [1.0, 0.0])
+    b = f.insert(1, "second", [0.9, 0.1])
+    root = f.union(a, b)
+
+    f.evict(root)
+    assert f.size() == 0
+    assert f.cluster_count() == 0
+    assert root not in f._summaries
+    assert root not in f._centroids
+    assert root not in f._meta
+
+
+def test_eviction_preserves_other_clusters():
+    """Evicting one cluster doesn't affect others."""
+    f = make_forest()
+    a = f.insert(0, "cluster_a", [1.0, 0.0])
+    b = f.insert(1, "cluster_b", [0.0, 1.0])
+
+    f.evict(a)
+    assert f.size() == 1
+    assert f.cluster_count() == 1
+    assert f.find(b) == b
+    assert f.compact(b) == "cluster_b"
+
+
+def test_save_load_roundtrip_with_meta(tmp_path):
+    """Metadata survives serialization."""
+    f = make_forest()
+    f.insert(0, "hello")
+    f._meta[0].strength = 2.5
+    f._meta[0].last_access_turn = 10
+    f._meta[0].created_at_turn = 3
+
+    path = tmp_path / "forest.json"
+    f.save(path)
+
+    f2 = make_forest()
+    f2.load(path)
+    assert abs(f2._meta[0].strength - 2.5) < 1e-6
+    assert f2._meta[0].last_access_turn == 10
+    assert f2._meta[0].created_at_turn == 3
+
+
+def test_v1_migration_creates_default_meta(tmp_path):
+    """Loading a v1 forest without meta creates default ClusterMeta."""
+    import json
+    # Simulate v1 save (no meta key)
+    data = {
+        "nodes": {"0": {"content": "hello", "embedding": [1.0], "parent": None, "rank": 0}},
+        "summaries": {},
+        "children": {"0": [0]},
+        "centroids": {"0": [1.0]},
+    }
+    path = tmp_path / "v1.json"
+    path.write_text(json.dumps(data))
+
+    f = make_forest()
+    f.load(path)
+    assert 0 in f._meta
+    assert f._meta[0].strength == 1.0

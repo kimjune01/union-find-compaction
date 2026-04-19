@@ -1,20 +1,27 @@
 """Union-find context compaction with LLM-generated cluster summaries.
 
-v3: temporal stamping for recency-aware merge.
+v4: value-based eviction (Anderson-inspired frequency × recency).
 
 E-class roots are cache keys for summaries. Union = cheap LLM merge.
 Graduation merges into nearest e-class if similar enough, else creates
 a new singleton. Retrieval embeds a query and returns top-k e-classes.
 Timestamps enable structural contradiction resolution in merge.
+
+Eviction replaces force-merge-closest-pair when cluster count exceeds cap.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+
+
+E = math.e  # Euler's number, used in decay shift
+D = 0.5     # decay exponent (ACT-R canonical default)
 
 
 class Embedder(Protocol):
@@ -37,6 +44,77 @@ class Message:
     timestamp: str | None = None  # ISO-8601, for recency-aware merge
     _parent: int | None = None  # union-find parent (None = self)
     _rank: int = 0  # union-find rank
+
+
+@dataclass
+class ClusterMeta:
+    """Per-root eviction metadata. strength is a latent value;
+    the eviction score is always strength × decay(elapsed)."""
+    strength: float = 1.0
+    last_access_turn: int = 0
+    created_at_turn: int = 0
+    last_retrieve_turn: int = -1  # for same-turn retrieval dedup only
+
+
+# ---------------------------------------------------------------------------
+# Eviction policy
+# ---------------------------------------------------------------------------
+
+
+def _decay(elapsed: int) -> float:
+    """Power-law decay with Euler shift: (elapsed + e)^(-d)."""
+    return (elapsed + E) ** (-D)
+
+
+def _need(meta: ClusterMeta, current_turn: int) -> float:
+    """Eviction score. Lower = evict first."""
+    elapsed = current_turn - meta.last_access_turn
+    return meta.strength * _decay(elapsed)
+
+
+class EvictionPolicy(Protocol):
+    """Swappable eviction scoring. Default: Anderson-inspired."""
+
+    def score(self, meta: ClusterMeta, current_turn: int) -> float: ...
+    def on_graduate(self, meta: ClusterMeta, current_turn: int) -> None: ...
+    def on_retrieve(self, meta: ClusterMeta, current_turn: int) -> None: ...
+    def on_write_absorb(self, meta: ClusterMeta, current_turn: int) -> None: ...
+    def on_merge(self, winner: ClusterMeta, loser: ClusterMeta, current_turn: int) -> None: ...
+
+
+class AndersonEviction:
+    """Frequency × recency with bounded running strength."""
+
+    def score(self, meta: ClusterMeta, current_turn: int) -> float:
+        return _need(meta, current_turn)
+
+    def on_graduate(self, meta: ClusterMeta, current_turn: int) -> None:
+        meta.strength = 1.0
+        meta.last_access_turn = current_turn
+        meta.created_at_turn = current_turn
+
+    def on_retrieve(self, meta: ClusterMeta, current_turn: int) -> None:
+        if meta.last_retrieve_turn == current_turn:
+            return  # dedup same-turn retrieval
+        meta.last_retrieve_turn = current_turn
+        elapsed = current_turn - meta.last_access_turn
+        meta.strength = meta.strength * _decay(elapsed) + 1.0
+        meta.last_access_turn = current_turn
+
+    def on_write_absorb(self, meta: ClusterMeta, current_turn: int) -> None:
+        elapsed = current_turn - meta.last_access_turn
+        meta.strength = meta.strength * _decay(elapsed) + 0.5
+        meta.last_access_turn = current_turn
+
+    def on_merge(self, winner: ClusterMeta, loser: ClusterMeta, current_turn: int) -> None:
+        w_elapsed = current_turn - winner.last_access_turn
+        l_elapsed = current_turn - loser.last_access_turn
+        winner.strength = (
+            winner.strength * _decay(w_elapsed)
+            + loser.strength * _decay(l_elapsed)
+        )
+        winner.last_access_turn = max(winner.last_access_turn, loser.last_access_turn)
+        winner.created_at_turn = min(winner.created_at_turn, loser.created_at_turn)
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -64,6 +142,7 @@ class Forest:
         self._summaries: dict[int, str] = {}  # root_id -> summary
         self._children: dict[int, list[int]] = {}  # root_id -> member ids
         self._centroids: dict[int, list[float]] = {}  # root_id -> centroid
+        self._meta: dict[int, ClusterMeta] = {}  # root_id -> eviction metadata
         self._embedder = embedder
         self._summarizer = summarizer
 
@@ -83,6 +162,7 @@ class Forest:
         self._nodes[msg_id] = msg
         self._children[msg_id] = [msg_id]
         self._centroids[msg_id] = list(embedding)
+        self._meta[msg_id] = ClusterMeta()
         return msg_id
 
     def find(self, msg_id: int) -> int:
@@ -107,7 +187,7 @@ class Forest:
         node_a = self._nodes[root_a]
         node_b = self._nodes[root_b]
 
-        # Union by rank
+        # Union by rank — winner is determined by rank, not argument order
         if node_a._rank < node_b._rank:
             root_a, root_b = root_b, root_a
             node_a, node_b = node_b, node_a
@@ -132,6 +212,10 @@ class Forest:
         elif ca:
             self._centroids[root_a] = ca
 
+        # Eviction metadata merge is handled by ContextWindow._graduate()
+        # which calls policy.on_merge() with both metas before popping the loser.
+        # Forest.union() does NOT touch _meta — ownership belongs to the caller.
+
         # Summarize merged e-class via cheap LLM
         # Sort by timestamp so summarizer sees chronological order
         member_ids = self._children[root_a]
@@ -149,6 +233,16 @@ class Forest:
         self._summaries[root_a] = self._summarizer.summarize(member_texts)
 
         return root_a
+
+    def evict(self, root_id: int) -> None:
+        """Delete an entire e-class: all members, summary, centroid, metadata."""
+        root = self.find(root_id)
+        member_ids = self._children.pop(root, [])
+        for mid in member_ids:
+            self._nodes.pop(mid, None)
+        self._summaries.pop(root, None)
+        self._centroids.pop(root, None)
+        self._meta.pop(root, None)
 
     def compact(self, root_id: int) -> str:
         """Return e-class summary for injection into context."""
@@ -237,6 +331,15 @@ class Forest:
             "summaries": {str(k): v for k, v in self._summaries.items()},
             "children": {str(k): v for k, v in self._children.items()},
             "centroids": {str(k): v for k, v in self._centroids.items()},
+            "meta": {
+                str(k): {
+                    "strength": m.strength,
+                    "last_access_turn": m.last_access_turn,
+                    "created_at_turn": m.created_at_turn,
+                    "last_retrieve_turn": m.last_retrieve_turn,
+                }
+                for k, m in self._meta.items()
+            },
         }
         Path(path).write_text(json.dumps(data))
 
@@ -257,6 +360,20 @@ class Forest:
         self._summaries = {int(k): v for k, v in data["summaries"].items()}
         self._children = {int(k): v for k, v in data["children"].items()}
         self._centroids = {int(k): v for k, v in data["centroids"].items()}
+        # Migration: existing forests without meta get default values
+        self._meta = {}
+        if "meta" in data:
+            for k, m in data["meta"].items():
+                self._meta[int(k)] = ClusterMeta(
+                    strength=m["strength"],
+                    last_access_turn=m["last_access_turn"],
+                    created_at_turn=m["created_at_turn"],
+                    last_retrieve_turn=m.get("last_retrieve_turn", -1),
+                )
+        else:
+            # v1 migration: treat all roots as freshly graduated
+            for root_id in self._children:
+                self._meta[root_id] = ClusterMeta()
 
 
 # ---------------------------------------------------------------------------
@@ -270,20 +387,17 @@ class ContextWindow:
     Hot: most recent messages, verbatim. Never compacted.
     Cold: older messages in a union-find forest of e-classes.
 
-    v2 changes from v1:
-    - Incremental compaction: graduating message merges into nearest
-      e-class if similarity > threshold, else creates new singleton.
-    - Retrieval: render(query) embeds the query and returns top-k
-      relevant cold e-classes + hot messages.
+    v4: value-based eviction replaces force-merge-closest-pair.
     """
 
     def __init__(
         self,
         embedder: Embedder,
         summarizer: Summarizer,
-        hot_size: int = 20,
+        hot_size: int = 30,
         max_cold_clusters: int = 10,
         merge_threshold: float = 0.3,
+        eviction_policy: EvictionPolicy | None = None,
     ) -> None:
         self._embedder = embedder
         self._summarizer = summarizer
@@ -292,10 +406,18 @@ class ContextWindow:
         self._hot_size = hot_size
         self._max_cold_clusters = max_cold_clusters
         self._merge_threshold = merge_threshold
+        self._policy: EvictionPolicy = eviction_policy or AndersonEviction()
+        self._turn = 0
         self._next_id = 0
 
-    def append(self, content: str, timestamp: str | None = None) -> int:
-        """Add a message. Enters hot; oldest graduates to cold."""
+    def append(self, content: str, timestamp: str | None = None, is_user: bool = False) -> int:
+        """Add a message. Enters hot; oldest graduates to cold.
+
+        Set is_user=True for user messages to increment the turn counter.
+        """
+        if is_user:
+            self._turn += 1
+
         msg_id = self._next_id
         self._next_id += 1
         embedding = self._embedder.embed(content)
@@ -309,18 +431,28 @@ class ContextWindow:
         return msg_id
 
     def _graduate(self, msg: Message) -> None:
-        """Incremental compaction with batch fallback.
+        """Incremental compaction with value-based eviction.
 
-        1. Insert as singleton.
+        1. Insert as singleton, initialize eviction metadata.
         2. Merge into nearest e-class if similarity > threshold.
-        3. Enforce hard cap: force-merge closest pairs until under limit.
+        3. Enforce hard cap: evict lowest-need cluster until under limit.
         """
         self._forest.insert(msg.id, msg.content, msg.embedding, msg.timestamp)
 
-        if self._forest.cluster_count() <= 1:
-            return
+        # Initialize eviction metadata for the new singleton
+        meta = self._forest._meta.get(msg.id)
+        if meta:
+            self._policy.on_graduate(meta, self._turn)
 
-        # Find nearest existing e-class (excluding the singleton we just inserted)
+        if self._forest.cluster_count() > 1:
+            self._try_merge(msg)
+
+        # Value-based eviction: evict lowest-need clusters
+        while self._forest.cluster_count() > self._max_cold_clusters:
+            self._evict_lowest()
+
+    def _try_merge(self, msg: Message) -> None:
+        """Try to merge the newly inserted singleton into the nearest existing cluster."""
         match = self._forest.nearest_root(msg.embedding)
         if match is None:
             return
@@ -328,7 +460,6 @@ class ContextWindow:
         nearest_root, sim = match
         # Don't merge with self
         if nearest_root == msg.id:
-            # Find second-nearest
             scored = []
             for root in self._forest.roots():
                 if root == msg.id:
@@ -343,14 +474,48 @@ class ContextWindow:
             sim, nearest_root = scored[0]
 
         if sim >= self._merge_threshold:
-            self._forest.union(msg.id, nearest_root)
+            # Merge eviction metadata before union (union may change roots)
+            msg_root = self._forest.find(msg.id)
+            near_root = self._forest.find(nearest_root)
+            meta_msg = self._forest._meta.get(msg_root)
+            meta_near = self._forest._meta.get(near_root)
+            # Write-absorb: the existing cluster is absorbing new content
+            if meta_near:
+                self._policy.on_write_absorb(meta_near, self._turn)
 
-        # Batch fallback: enforce hard cap on cluster count
-        while self._forest.cluster_count() > self._max_cold_clusters:
-            pair = find_closest_pair(self._forest)
-            if pair is None:
-                break
-            self._forest.union(*pair)
+            winner = self._forest.union(msg.id, nearest_root)
+
+            # After union, winner root has the merged metadata
+            # on_merge combines the two metas
+            winner_meta = self._forest._meta.get(winner)
+            # The loser's meta was already popped by forest — we need to
+            # handle merge before union consumes it. Restructure:
+            # Actually, forest doesn't pop meta in union. We handle it here.
+            loser_root = near_root if winner != near_root else msg_root
+            loser_meta = self._forest._meta.pop(loser_root, None)
+            if winner_meta and loser_meta:
+                self._policy.on_merge(winner_meta, loser_meta, self._turn)
+
+    def _evict_lowest(self) -> None:
+        """Evict the cluster with the lowest need score."""
+        roots = self._forest.roots()
+        if not roots:
+            return
+
+        scored = []
+        for root in roots:
+            meta = self._forest._meta.get(root)
+            if meta:
+                score = self._policy.score(meta, self._turn)
+                scored.append((score, meta.created_at_turn, root))
+            else:
+                scored.append((0.0, 0, root))
+
+        # Sort: lowest score first. Tie-break: higher created_at first
+        # (newer evicted before older), then higher root ID.
+        scored.sort(key=lambda x: (x[0], -x[1], -x[2]))
+        _, _, victim = scored[0]
+        self._forest.evict(victim)
 
     def render(
         self, query: str | None = None, k: int = 3, min_sim: float = 0.05
@@ -358,12 +523,18 @@ class ContextWindow:
         """Return context: retrieved cold e-classes + hot messages.
 
         If query is provided, embed it and retrieve top-k cold e-classes
-        with similarity >= min_sim. If query is None, return all cold
-        summaries (v1 behavior).
+        with similarity >= min_sim. Tracks retrieval hits for eviction.
         """
         if query is not None and self._forest.cluster_count() > 0:
             query_emb = self._embedder.embed(query)
             top_roots = self._forest.nearest(query_emb, k, min_sim=min_sim)
+
+            # Track retrieval hits
+            for root in top_roots:
+                meta = self._forest._meta.get(root)
+                if meta:
+                    self._policy.on_retrieve(meta, self._turn)
+
             cold = [self._forest.compact(r) for r in top_roots]
         else:
             cold = [self._forest.compact(r) for r in self._forest.roots()]
@@ -373,6 +544,10 @@ class ContextWindow:
 
     def expand(self, root_id: int) -> list[str]:
         return self._forest.expand(root_id)
+
+    @property
+    def turn(self) -> int:
+        return self._turn
 
     @property
     def hot_count(self) -> int:
