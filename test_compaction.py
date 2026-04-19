@@ -528,3 +528,73 @@ def test_v1_migration_creates_default_meta(tmp_path):
     f.load(path)
     assert 0 in f._meta
     assert f._meta[0].strength == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Gemini bug-hunt findings
+# ---------------------------------------------------------------------------
+
+
+def test_no_double_decay_on_merge():
+    """on_write_absorb should NOT be called before on_merge (double decay)."""
+    class SpyPolicy:
+        def __init__(self):
+            self.absorbs = 0
+            self.merges = 0
+        def score(self, meta, turn): return 0.0
+        def on_graduate(self, meta, turn): pass
+        def on_retrieve(self, meta, turn): pass
+        def on_write_absorb(self, meta, turn):
+            self.absorbs += 1
+        def on_merge(self, winner, loser, turn):
+            self.merges += 1
+
+    class UniformEmbedder:
+        def embed(self, text): return [1.0, 0.0]
+
+    policy = SpyPolicy()
+    w = ContextWindow(
+        UniformEmbedder(), StubSummarizer(),
+        hot_size=1, max_cold_clusters=10,
+        merge_threshold=0.5, eviction_policy=policy
+    )
+    w.append("A", is_user=True)
+    w.append("B", is_user=True)  # A graduates
+    w.append("C", is_user=True)  # B graduates and merges into A
+
+    assert policy.merges == 1
+    assert policy.absorbs == 0, "on_write_absorb was called before on_merge, causing double decay"
+
+
+def test_merge_preserves_last_retrieve_turn():
+    """on_merge should transfer last_retrieve_turn from loser."""
+    policy = AndersonEviction()
+    loser = ClusterMeta(strength=2.0, last_access_turn=10, created_at_turn=1)
+    loser.last_retrieve_turn = 10
+    winner = ClusterMeta(strength=1.0, last_access_turn=12, created_at_turn=12)
+    winner.last_retrieve_turn = -1
+
+    policy.on_merge(winner, loser, 12)
+    assert winner.last_retrieve_turn == 10
+
+
+def test_union_cleans_loser_summary():
+    """Forest.union() should remove the loser's stale summary."""
+    f = make_forest()
+    a = f.insert(0, "A")
+    b = f.insert(1, "B")
+    f._summaries[a] = "summary A"
+    f._summaries[b] = "summary B"
+
+    winner = f.union(a, b)
+    loser = b if winner == a else a
+    assert loser not in f._summaries, "Loser summary leaked"
+
+
+def test_nearest_root_at_negative_one():
+    """nearest_root should work even when best similarity is exactly -1.0."""
+    f = make_forest()
+    f.insert(0, "A", [-1.0, 0.0])
+    result = f.nearest_root([1.0, 0.0])
+    assert result is not None
+    assert result[0] == 0

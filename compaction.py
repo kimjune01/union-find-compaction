@@ -115,6 +115,7 @@ class AndersonEviction:
         )
         winner.last_access_turn = max(winner.last_access_turn, loser.last_access_turn)
         winner.created_at_turn = min(winner.created_at_turn, loser.created_at_turn)
+        winner.last_retrieve_turn = max(winner.last_retrieve_turn, loser.last_retrieve_turn)
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -195,9 +196,10 @@ class Forest:
         if node_a._rank == node_b._rank:
             node_a._rank += 1
 
-        # Merge children lists
+        # Merge children lists and clean up loser's summary
         members_b = self._children.pop(root_b, [])
         self._children.setdefault(root_a, []).extend(members_b)
+        self._summaries.pop(root_b, None)
 
         # Update centroid (weighted average)
         ca = self._centroids.pop(root_a, [])
@@ -278,7 +280,7 @@ class Forest:
 
     def nearest_root(self, query_embedding: list[float]) -> tuple[int, float] | None:
         """Return the single nearest e-class root and its similarity."""
-        best_sim = -1.0
+        best_sim = -float('inf')
         best_root = None
         for root in self._children:
             centroid = self._centroids.get(root)
@@ -474,24 +476,15 @@ class ContextWindow:
             sim, nearest_root = scored[0]
 
         if sim >= self._merge_threshold:
-            # Merge eviction metadata before union (union may change roots)
             msg_root = self._forest.find(msg.id)
             near_root = self._forest.find(nearest_root)
-            meta_msg = self._forest._meta.get(msg_root)
-            meta_near = self._forest._meta.get(near_root)
-            # Write-absorb: the existing cluster is absorbing new content
-            if meta_near:
-                self._policy.on_write_absorb(meta_near, self._turn)
 
             winner = self._forest.union(msg.id, nearest_root)
 
-            # After union, winner root has the merged metadata
-            # on_merge combines the two metas
-            winner_meta = self._forest._meta.get(winner)
-            # The loser's meta was already popped by forest — we need to
-            # handle merge before union consumes it. Restructure:
-            # Actually, forest doesn't pop meta in union. We handle it here.
+            # Merge eviction metadata: on_merge combines both strengths.
+            # No separate on_write_absorb — that would double-decay.
             loser_root = near_root if winner != near_root else msg_root
+            winner_meta = self._forest._meta.get(winner)
             loser_meta = self._forest._meta.pop(loser_root, None)
             if winner_meta and loser_meta:
                 self._policy.on_merge(winner_meta, loser_meta, self._turn)
