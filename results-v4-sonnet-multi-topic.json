@@ -1,0 +1,159 @@
+{
+  "model": "claude-sonnet-4-6",
+  "flat_acc": 0.6,
+  "uf_acc": 0.6,
+  "flat_trials": [
+    {
+      "q": "What DNS server IP does kgignatyev-inspur report?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "What GKE version does ani82 observe the DNS issue on?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "What was the cause of DNS delays in aguerra's case?",
+      "topic": "DNS delays",
+      "ok": false
+    },
+    {
+      "q": "According to bobrik, is the CFS issue a configuration tradeoff or a kernel bug?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What kubelet flag does hjacobs mention to disable CFS quota?",
+      "topic": "CFS throttling",
+      "ok": true
+    },
+    {
+      "q": "According to vishh, what is the best approach for clusters running trusted workloads?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What Docker image is mjsalinger using?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What does lsof | wc -l show when Docker becomes unresponsive?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What OS is mjsalinger using according to unclejack?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What resolv.conf option did vasartori find fixes the DNS problem?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "According to timoreimann, has Google exposed the knobs to disable CFS on GKE?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "Who contributed a flag to Kops to disable CPU throttling?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What storage driver does mjsalinger say caused I/O bottlenecks?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What kernel version does unclejack recommend for Ubuntu 14.04?",
+      "topic": "Docker daemon hangs",
+      "ok": false
+    },
+    {
+      "q": "What GKE version does aca02djr report the issue on?",
+      "topic": "DNS delays",
+      "ok": true
+    }
+  ],
+  "uf_trials": [
+    {
+      "q": "What DNS server IP does kgignatyev-inspur report?",
+      "topic": "DNS delays",
+      "ok": false
+    },
+    {
+      "q": "What GKE version does ani82 observe the DNS issue on?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "What was the cause of DNS delays in aguerra's case?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "According to bobrik, is the CFS issue a configuration tradeoff or a kernel bug?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What kubelet flag does hjacobs mention to disable CFS quota?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "According to vishh, what is the best approach for clusters running trusted workloads?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What Docker image is mjsalinger using?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What does lsof | wc -l show when Docker becomes unresponsive?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What OS is mjsalinger using according to unclejack?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What resolv.conf option did vasartori find fixes the DNS problem?",
+      "topic": "DNS delays",
+      "ok": true
+    },
+    {
+      "q": "According to timoreimann, has Google exposed the knobs to disable CFS on GKE?",
+      "topic": "CFS throttling",
+      "ok": true
+    },
+    {
+      "q": "Who contributed a flag to Kops to disable CPU throttling?",
+      "topic": "CFS throttling",
+      "ok": false
+    },
+    {
+      "q": "What storage driver does mjsalinger say caused I/O bottlenecks?",
+      "topic": "Docker daemon hangs",
+      "ok": false
+    },
+    {
+      "q": "What kernel version does unclejack recommend for Ubuntu 14.04?",
+      "topic": "Docker daemon hangs",
+      "ok": true
+    },
+    {
+      "q": "What GKE version does aca02djr report the issue on?",
+      "topic": "DNS delays",
+      "ok": true
+    }
+  ]
+}

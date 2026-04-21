@@ -1,0 +1,105 @@
+{
+  "source": "kubernetes/kubernetes#56903",
+  "fm_acc": 0.1875,
+  "ev_acc": 0.25,
+  "fm_nodes": 190,
+  "ev_nodes": 190,
+  "trials": [
+    {
+      "q": "How long is the DNS lookup delay described in the original bug report?",
+      "topic": "symptoms",
+      "fm_ok": false,
+      "ev_ok": true
+    },
+    {
+      "q": "What DNS server IP address does kgignatyev-inspur report?",
+      "topic": "symptoms",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What GKE version does ani82 report the DNS issue on?",
+      "topic": "symptoms",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What DNS server IP does ani82 report on GKE?",
+      "topic": "symptoms",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "According to thockin, what does a 5-second delay always indicate?",
+      "topic": "rootcause",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What GKE version does aca02djr report the issue on?",
+      "topic": "config",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What Kubernetes versions was sdtokkolabs experiencing the DNS issue on?",
+      "topic": "workaround",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What version did sdtokkolabs upgrade their cluster to?",
+      "topic": "config",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What command was run on hosts to check for conntrack issues?",
+      "topic": "rootcause",
+      "fm_ok": true,
+      "ev_ok": true
+    },
+    {
+      "q": "Why does single-request-reopen not work with Alpine containers?",
+      "topic": "workaround",
+      "fm_ok": true,
+      "ev_ok": true
+    },
+    {
+      "q": "What EC2 hostname is shown in the conntrack output from KIVagant?",
+      "topic": "rootcause",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What did the OP switch from to resolve their DNS throttling?",
+      "topic": "workaround",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What is the hit rate szuecs reports for node-local dnsmasq?",
+      "topic": "fix",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "What does flannel-tc do according to szuecs?",
+      "topic": "fix",
+      "fm_ok": false,
+      "ev_ok": false
+    },
+    {
+      "q": "Where were kernel patches submitted to fix the conntrack races?",
+      "topic": "rootcause",
+      "fm_ok": true,
+      "ev_ok": true
+    },
+    {
+      "q": "Who submitted the kernel patches to fix conntrack races?",
+      "topic": "fix",
+      "fm_ok": false,
+      "ev_ok": false
+    }
+  ]
+}
